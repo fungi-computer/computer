@@ -1,0 +1,71 @@
+{
+  "revision": "25408429035cb19deaa87d1f736ddc6374484770",
+  "command": "pnpm --dir packages/forage run build",
+  "files": [
+    {
+      "path": "tsconfig.json",
+      "bytes": 913,
+      "sha256": "2d607884da6cca949fbe22e4005877df95303a64d9b849ae8ad88f17b0244983"
+    },
+    {
+      "path": "packages/forage/package.json",
+      "bytes": 1813,
+      "sha256": "c5c09b9ced33b7576199ce7e7fc27b62747bbb10094905de20871751c9338f86"
+    },
+    {
+      "path": "packages/forage/tsconfig.json",
+      "bytes": 182,
+      "sha256": "21b80abe7f7dcc5b029eab4885be1d7258ee983dfdb5bc7074cf35a4cabf897d"
+    },
+    {
+      "path": "packages/forage/tsconfig.build.json",
+      "bytes": 159,
+      "sha256": "09f9853f94d5d4ace1645eae9220887985782f140c4ff7bfded729c87f7dc1e9"
+    },
+    {
+      "path": "packages/forage/src/catalog.ts",
+      "bytes": 5364,
+      "sha256": "97aa3db2db71792aab60a42efa427c45785df22855a810630054f1a0f8c357dd"
+    },
+    {
+      "path": "packages/forage/src/definitions.ts",
+      "bytes": 1166,
+      "sha256": "d5f72561fee71cebc8344c779e0e1583913bdc168d5b91cd2daa7a4d6e58f0ec"
+    },
+    {
+      "path": "packages/forage/src/describe.ts",
+      "bytes": 3103,
+      "sha256": "f3ca8fb9ed9e25bedd90d98e5773683cdbdfc8d346cb52ecef792a501bd37546"
+    },
+    {
+      "path": "packages/forage/src/errors.ts",
+      "bytes": 490,
+      "sha256": "511f8316163d6fc53c4eb9d8aead294a53e4a4d2db19b4353266e705e3141203"
+    },
+    {
+      "path": "packages/forage/src/index.ts",
+      "bytes": 1414,
+      "sha256": "c6c8f01746731d330e2c1a6c79913a3cbfcc22df2c120343f8b56469fe32a810"
+    },
+    {
+      "path": "packages/forage/src/normalization.ts",
+      "bytes": 3204,
+      "sha256": "9d47d9841da3790231245b54df00a1c5912e9952643cdb48343e5c502b72b226"
+    },
+    {
+      "path": "packages/forage/src/rendering.ts",
+      "bytes": 9440,
+      "sha256": "ee4d53904871bb16e512a240137ade1adc8c02498f7d9cc7592855338e82e19f"
+    },
+    {
+      "path": "packages/forage/src/schemas.ts",
+      "bytes": 4973,
+      "sha256": "da95f163e3861f2bf4fdc6b3094a195c8296b7fab5173f5c8ba4467119630206"
+    },
+    {
+      "path": "packages/forage/src/search.ts",
+      "bytes": 9552,
+      "sha256": "07abd808b292e4dabd9774b21c6eb191c5b6e8bce2c098c608d4db4178dd9edd"
+    }
+  ]
+}

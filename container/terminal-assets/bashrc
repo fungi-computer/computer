@@ -1,0 +1,49 @@
+# Retained interactive Bash prompt, adapted from Botanical's shell assets.
+# This file is sourced by the image's system bashrc (including login shells).
+case $- in
+  *i*) ;;
+  *) return ;;
+esac
+[[ ${_FUNGI_SHELL_READY:-} ]] && return
+_FUNGI_SHELL_READY=1
+
+shopt -s checkwinsize histappend
+# Branches, Computer names and directories are data, not prompt shell code.
+shopt -u promptvars
+export HISTCONTROL=ignoreboth
+export HISTSIZE=10000
+. /opt/fungi/terminal-assets/git-prompt.sh
+
+# Caps mocha: coral directories, teal links, green executables, pink archives.
+if [[ -t 1 && ! ${NO_COLOR+x} && ${TERM:-dumb} != dumb ]]; then
+  export LS_COLORS='di=38;2;249;130;132:ln=38;2;148;226;213:ex=38;2;166;227;161:*.tar=38;2;245;194;231:*.gz=38;2;245;194;231:*.zip=38;2;245;194;231'
+  export GREP_COLORS='ms=38;2;249;130;132'
+  alias ls='ls --color=auto'
+  alias grep='grep --color=auto'
+else
+  unset LS_COLORS
+  alias ls='ls --color=never'
+  alias grep='grep --color=never'
+fi
+
+_FUNGI_UPDATE_PS1() {
+  local exit_code=$? mark='✓' branch='' dirty='' tint='' reset=''
+  [[ $exit_code == 0 ]] || mark="✗ $exit_code"
+  if [[ -t 1 && ! ${NO_COLOR+x} && ${TERM:-dumb} != dumb ]]; then
+    tint='\[\e[38;2;249;130;132m\]'
+    reset='\[\e[0m\]'
+  fi
+  branch=$(__git_ps1 '%s' 2>/dev/null)
+  if [[ -n $branch ]]; then
+    [[ -z $(git status --porcelain 2>/dev/null) ]] || dirty=' *'
+    branch=" git:($branch)$dirty"
+  fi
+  local computer=${FUNGI_COMPUTER_NAME:-Computer}
+  # Strip prompt escapes/control bytes from names and branch text.
+  computer=${computer//[[:cntrl:]]/}
+  computer=${computer//\\/?}
+  branch=${branch//[[:cntrl:]]/}
+  branch=${branch//\\/?}
+  PS1="$tint$mark ${USER:-fungi}@$computer \W$branch$reset ➜ "
+}
+PROMPT_COMMAND=_FUNGI_UPDATE_PS1

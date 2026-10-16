@@ -1,0 +1,5 @@
+# Standalone install for the Computer image; not a member of the repo workspace.
+allowBuilds:
+  node-pty: true
+  fuse-native: true
+  esbuild: true

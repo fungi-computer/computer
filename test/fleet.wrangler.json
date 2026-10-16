@@ -1,0 +1,10 @@
+{
+  "name": "computer-fleet-proof",
+  "main": "fleet.fixture.ts",
+  "compatibility_date": "2026-09-04",
+  "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": {
+    "bindings": [{ "name": "FLEET", "class_name": "FleetProof" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["FleetProof"] }]
+}
