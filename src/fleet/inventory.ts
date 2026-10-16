@@ -17,23 +17,27 @@ const computerIds = defineIdFamily({
   kinds: { computer: { prefix: "computer" } },
 });
 
-const rowSchema = z.strictObject({
-  computer_id: z.string().min(1),
-  name: z.string().min(1).max(256),
-  actor_kind: z.string().min(1),
-  actor_id: z.string().min(1).max(256),
-  active: z.number().int().min(0).max(1),
-  created_at: z.number().int().nonnegative(),
-  updated_at: z.number().int().nonnegative(),
-});
-const receiptSchema = z.strictObject({
-  requested_name: z.string().min(1).max(256).nullable(),
-  request_id: z.string().min(1).max(256),
-  actor_kind: z.string().min(1),
-  actor_id: z.string().min(1).max(256),
-  name: z.string().min(1).max(256),
-  computer_id: z.string().min(1),
-});
+const rowSchema = z.lazy(() =>
+  z.strictObject({
+    computer_id: z.string().min(1),
+    name: z.string().min(1).max(256),
+    actor_kind: z.string().min(1),
+    actor_id: z.string().min(1).max(256),
+    active: z.number().int().min(0).max(1),
+    created_at: z.number().int().nonnegative(),
+    updated_at: z.number().int().nonnegative(),
+  }),
+);
+const receiptSchema = z.lazy(() =>
+  z.strictObject({
+    requested_name: z.string().min(1).max(256).nullable(),
+    request_id: z.string().min(1).max(256),
+    actor_kind: z.string().min(1),
+    actor_id: z.string().min(1).max(256),
+    name: z.string().min(1).max(256),
+    computer_id: z.string().min(1),
+  }),
+);
 
 const selectRow =
   "SELECT computer_id,name,actor_kind,actor_id,active,created_at,updated_at FROM hub_team_computers";

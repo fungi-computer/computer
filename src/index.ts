@@ -133,9 +133,11 @@ const terminalDefaultCols = 80;
 const terminalDefaultRows = 24;
 /** How often an attached terminal's container changes reach the Workspace. */
 const terminalSyncIntervalMs = 3_000;
-const terminalSessionsSchema = z.strictObject({
-  attached: z.number().int().nonnegative(),
-});
+const terminalSessionsSchema = z.lazy(() =>
+  z.strictObject({
+    attached: z.number().int().nonnegative(),
+  }),
+);
 async function sha256(value: string): Promise<string> {
   const bytes = new TextEncoder().encode(value);
   const digest = await crypto.subtle.digest("SHA-256", bytes);
@@ -144,15 +146,17 @@ async function sha256(value: string): Promise<string> {
   ).join("");
 }
 
-const terminalQuerySchema = z.strictObject({
-  session: z
-    .string()
-    .min(1)
-    .max(128)
-    .regex(/^[A-Za-z0-9._-]+$/),
-  cols: z.coerce.number().int().min(2).max(500).catch(terminalDefaultCols),
-  rows: z.coerce.number().int().min(2).max(300).catch(terminalDefaultRows),
-});
+const terminalQuerySchema = z.lazy(() =>
+  z.strictObject({
+    session: z
+      .string()
+      .min(1)
+      .max(128)
+      .regex(/^[A-Za-z0-9._-]+$/),
+    cols: z.coerce.number().int().min(2).max(500).catch(terminalDefaultCols),
+    rows: z.coerce.number().int().min(2).max(300).catch(terminalDefaultRows),
+  }),
+);
 
 /** The exact RPC surface of one Computer Durable Object. */
 export type ComputerRpc = WorkspaceStubHost &

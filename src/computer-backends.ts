@@ -9,8 +9,10 @@ import * as z from "zod";
  * id at most; a local backend carries its device's public key and two display
  * labels, never a path on the member's machine.
  */
-const hostIdSchema = z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/);
-const labelSchema = z.string().trim().min(1).max(256);
+const hostIdSchema = z.lazy(() =>
+  z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/),
+);
+const labelSchema = z.lazy(() => z.string().trim().min(1).max(256));
 
 /** A backend the platform runs: a Cloudflare container or an on-box VM. */
 export const hostedBackingSchema = z.discriminatedUnion("kind", [
@@ -49,18 +51,22 @@ export function attachedBackendId(backend: AttachedBackend): string {
 }
 
 /** One Computer's attached backends, in attach order; ids are unique. */
-export const attachedBackendsSchema = z
-  .array(attachedBackendSchema)
-  .max(16)
-  .refine(
-    (backends) =>
-      new Set(backends.map(attachedBackendId)).size === backends.length,
-    "attached backend ids must be unique",
-  );
+export const attachedBackendsSchema = z.lazy(() =>
+  z
+    .array(attachedBackendSchema)
+    .max(16)
+    .refine(
+      (backends) =>
+        new Set(backends.map(attachedBackendId)).size === backends.length,
+      "attached backend ids must be unique",
+    ),
+);
 
-export const attachedBackendIdSchema = z
-  .string()
-  .regex(/^(container|vm-[a-z0-9][a-z0-9-]{0,62}|local-[a-z2-7]{16})$/);
+export const attachedBackendIdSchema = z.lazy(() =>
+  z
+    .string()
+    .regex(/^(container|vm-[a-z0-9][a-z0-9-]{0,62}|local-[a-z2-7]{16})$/),
+);
 
 export type AttachedBackendStatus = "ready" | "online" | "offline";
 

@@ -20,14 +20,18 @@ export const genericComputerExecutionBudget: ComputerExecutionBudget =
 export const computerValueSchema = z.json();
 export type ComputerValue = z.output<typeof computerValueSchema>;
 
-export const capabilityNameSchema = z
-  .string()
-  .min(1)
-  .max(128)
-  .regex(/^[A-Za-z][A-Za-z0-9_]*$/);
+export const capabilityNameSchema = z.lazy(() =>
+  z
+    .string()
+    .min(1)
+    .max(128)
+    .regex(/^[A-Za-z][A-Za-z0-9_]*$/),
+);
 
 /** One valid TCP port number, used only with this Computer's container. */
-export const computerPortSchema = z.number().int().min(1).max(65_535);
+export const computerPortSchema = z.lazy(() =>
+  z.number().int().min(1).max(65_535),
+);
 export const maximumExposedPorts = 64;
 /** computerd's Workspace RPC port, pinned by the Cloudflare container backend. */
 export const computerDaemonPort = 8080;
@@ -47,17 +51,23 @@ export function isComputerReservedPort(port: number): boolean {
 export const computerPortInputSchema = z.strictObject({
   port: computerPortSchema,
 });
-export const computerPortOutputSchema = z.strictObject({
-  port: computerPortSchema,
-  exposed: z.boolean(),
-});
-export const computerPortRemovalOutputSchema = z.strictObject({
-  port: computerPortSchema,
-  removed: z.boolean(),
-});
-export const computerPortsOutputSchema = z.strictObject({
-  ports: z.array(computerPortSchema).max(maximumExposedPorts),
-});
+export const computerPortOutputSchema = z.lazy(() =>
+  z.strictObject({
+    port: computerPortSchema,
+    exposed: z.boolean(),
+  }),
+);
+export const computerPortRemovalOutputSchema = z.lazy(() =>
+  z.strictObject({
+    port: computerPortSchema,
+    removed: z.boolean(),
+  }),
+);
+export const computerPortsOutputSchema = z.lazy(() =>
+  z.strictObject({
+    ports: z.array(computerPortSchema).max(maximumExposedPorts),
+  }),
+);
 
 /** The port belongs to a Computer daemon and cannot be admitted for preview. */
 export class ComputerPortReservedError extends Error {
@@ -85,23 +95,27 @@ export class ComputerPortLimitError extends Error {
 
 // Schema keywords are opaque transport data. Zod still validates every value
 // as JSON before the description leaves or enters the Computer boundary.
-const schemaDocument = z
-  .record(z.string(), z.unknown())
-  .refine(
-    (value) => computerValueSchema.safeParse(value).success,
-    "Capability schema must contain JSON values",
-  );
+const schemaDocument = z.lazy(() =>
+  z
+    .record(z.string(), z.unknown())
+    .refine(
+      (value) => computerValueSchema.safeParse(value).success,
+      "Capability schema must contain JSON values",
+    ),
+);
 
 /** Native operation descriptions shared by discovery and its OpenAPI document. */
-export const computerCapabilitiesSchema = z.array(
-  z.strictObject({
-    id: capabilityNameSchema,
-    name: capabilityNameSchema,
-    kind: z.string(),
-    description: z.string(),
-    parameters: schemaDocument,
-    output: schemaDocument,
-  }),
+export const computerCapabilitiesSchema = z.lazy(() =>
+  z.array(
+    z.strictObject({
+      id: capabilityNameSchema,
+      name: capabilityNameSchema,
+      kind: z.string(),
+      description: z.string(),
+      parameters: schemaDocument,
+      output: schemaDocument,
+    }),
+  ),
 );
 
 export const pathSchema = z
@@ -123,10 +137,12 @@ export const boundedTextSchema = (minimumLength = 0) =>
 /** Complete bounded UTF-8 text reads. Binary reads use the same path input. */
 export const readInputSchema = z.strictObject({ path: pathSchema });
 export type ComputerFileReadInput = z.output<typeof readInputSchema>;
-export const readOutputSchema = z.strictObject({
-  path: pathSchema,
-  content: boundedTextSchema(),
-});
+export const readOutputSchema = z.lazy(() =>
+  z.strictObject({
+    path: pathSchema,
+    content: boundedTextSchema(),
+  }),
+);
 export type ComputerFileReadOutput = z.output<typeof readOutputSchema>;
 /** Optional byte window; text reads remain complete and independently bounded. */
 export const readBytesInputSchema = z.strictObject({
@@ -137,19 +153,23 @@ export const readBytesInputSchema = z.strictObject({
 export type ComputerFileByteReadInput = z.output<typeof readBytesInputSchema>;
 
 /** Finite byte-read reply used by admitted App frame bindings. */
-export const computerByteReadReplySchema = z.strictObject({
-  path: readBytesInputSchema.shape.path,
-  byteOffset: z.number().int().nonnegative(),
-  content: z.string(),
-  encoding: z.literal("base64"),
-  truncated: z.boolean(),
-});
+export const computerByteReadReplySchema = z.lazy(() =>
+  z.strictObject({
+    path: readBytesInputSchema.shape.path,
+    byteOffset: z.number().int().nonnegative(),
+    content: z.string(),
+    encoding: z.literal("base64"),
+    truncated: z.boolean(),
+  }),
+);
 
 /** Host-admitted App method preview; parsing does not grant port access. */
-export const appMethodPreviewResultSchema = z.strictObject({
-  previewUrl: z.url(),
-  expiresAt: z.number().int().positive(),
-});
+export const appMethodPreviewResultSchema = z.lazy(() =>
+  z.strictObject({
+    previewUrl: z.url(),
+    expiresAt: z.number().int().positive(),
+  }),
+);
 
 export const listLimitSchema = z
   .number()
@@ -163,34 +183,42 @@ export const listInputSchema = z.strictObject({
   limit: listLimitSchema,
   offset: listOffsetSchema,
 });
-const listEntrySchema = z.strictObject({
-  name: z.string(),
-  size: z.number().int().nonnegative(),
-  modifiedAt: z.number(),
-  type: z.enum(["file", "directory", "symlink"]),
-});
-export const listOutputSchema = z.strictObject({
-  path: pathSchema,
-  entries: z.array(listEntrySchema).max(maximumListEntries),
-  nextOffset: z.number().int().nonnegative().nullable(),
-});
+const listEntrySchema = z.lazy(() =>
+  z.strictObject({
+    name: z.string(),
+    size: z.number().int().nonnegative(),
+    modifiedAt: z.number(),
+    type: z.enum(["file", "directory", "symlink"]),
+  }),
+);
+export const listOutputSchema = z.lazy(() =>
+  z.strictObject({
+    path: pathSchema,
+    entries: z.array(listEntrySchema).max(maximumListEntries),
+    nextOffset: z.number().int().nonnegative().nullable(),
+  }),
+);
 export type ComputerFileListInput = z.output<typeof listInputSchema>;
 export type ComputerFileListOutput = z.output<typeof listOutputSchema>;
 
-export const fileContentSchema = z
-  .string()
-  .refine(
-    (content) => utf8.encode(content).byteLength <= maximumFileBytes,
-    "File exceeds the Computer write bound",
-  );
+export const fileContentSchema = z.lazy(() =>
+  z
+    .string()
+    .refine(
+      (content) => utf8.encode(content).byteLength <= maximumFileBytes,
+      "File exceeds the Computer write bound",
+    ),
+);
 export const writeInputSchema = z.strictObject({
   path: pathSchema,
   content: fileContentSchema,
 });
-export const writeOutputSchema = z.strictObject({
-  path: pathSchema,
-  bytes: z.number().int().nonnegative(),
-});
+export const writeOutputSchema = z.lazy(() =>
+  z.strictObject({
+    path: pathSchema,
+    bytes: z.number().int().nonnegative(),
+  }),
+);
 export type ComputerFileWriteInput = z.output<typeof writeInputSchema>;
 export type ComputerFileWriteOutput = z.output<typeof writeOutputSchema>;
 export const writeBytesInputSchema = readInputSchema;
@@ -202,59 +230,71 @@ export const replaceInputSchema = z.strictObject({
 });
 export const replaceOutputSchema = writeOutputSchema;
 
-export const globInputSchema = z.strictObject({
-  path: pathSchema,
-  pattern: z.string().min(1).max(maximumPatternCharacters),
-  limit: z
-    .number()
-    .int()
-    .min(1)
-    .max(maximumListEntries)
-    .default(maximumListEntries),
-});
-export const globOutputSchema = z.strictObject({
-  path: pathSchema,
-  matches: z.array(pathSchema).max(maximumListEntries),
-  truncated: z.boolean(),
-});
+export const globInputSchema = z.lazy(() =>
+  z.strictObject({
+    path: pathSchema,
+    pattern: z.string().min(1).max(maximumPatternCharacters),
+    limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(maximumListEntries)
+      .default(maximumListEntries),
+  }),
+);
+export const globOutputSchema = z.lazy(() =>
+  z.strictObject({
+    path: pathSchema,
+    matches: z.array(pathSchema).max(maximumListEntries),
+    truncated: z.boolean(),
+  }),
+);
 
-export const grepInputSchema = z.strictObject({
-  path: pathSchema,
-  pattern: z.string().min(1).max(maximumPatternCharacters),
-  regex: z.boolean().default(false),
-  ignoreCase: z.boolean().default(false),
-  limit: z
-    .number()
-    .int()
-    .min(1)
-    .max(maximumListEntries)
-    .default(maximumListEntries),
-});
-export const grepOutputSchema = z.strictObject({
-  path: pathSchema,
-  matches: z
-    .array(
-      z.strictObject({
-        path: pathSchema,
-        line: z.number().int().positive(),
-        text: z.string(),
-      }),
-    )
-    .max(maximumListEntries),
-  truncated: z.boolean(),
-});
+export const grepInputSchema = z.lazy(() =>
+  z.strictObject({
+    path: pathSchema,
+    pattern: z.string().min(1).max(maximumPatternCharacters),
+    regex: z.boolean().default(false),
+    ignoreCase: z.boolean().default(false),
+    limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(maximumListEntries)
+      .default(maximumListEntries),
+  }),
+);
+export const grepOutputSchema = z.lazy(() =>
+  z.strictObject({
+    path: pathSchema,
+    matches: z
+      .array(
+        z.strictObject({
+          path: pathSchema,
+          line: z.number().int().positive(),
+          text: z.string(),
+        }),
+      )
+      .max(maximumListEntries),
+    truncated: z.boolean(),
+  }),
+);
 
-export const editInputSchema = z.strictObject({
-  path: pathSchema,
-  oldText: boundedTextSchema(1),
-  newText: boundedTextSchema(),
-});
-export const editOutputSchema = z.strictObject({
-  path: pathSchema,
-  bytes: z.number().int().nonnegative(),
-  diff: z.string(),
-  firstChangedLine: z.number().int().positive().nullable(),
-});
+export const editInputSchema = z.lazy(() =>
+  z.strictObject({
+    path: pathSchema,
+    oldText: boundedTextSchema(1),
+    newText: boundedTextSchema(),
+  }),
+);
+export const editOutputSchema = z.lazy(() =>
+  z.strictObject({
+    path: pathSchema,
+    bytes: z.number().int().nonnegative(),
+    diff: z.string(),
+    firstChangedLine: z.number().int().positive().nullable(),
+  }),
+);
 
 // Native Files tools and Computer HTTP decode the same patch contract.
 export {
@@ -262,10 +302,12 @@ export {
   patchOutputSchema,
 } from "@fungi.computer/knapsack/files-patch";
 
-export const mkdirInputSchema = z.strictObject({
-  path: pathSchema,
-  recursive: z.boolean().default(true),
-});
+export const mkdirInputSchema = z.lazy(() =>
+  z.strictObject({
+    path: pathSchema,
+    recursive: z.boolean().default(true),
+  }),
+);
 export const mkdirOutputSchema = z.strictObject({ path: pathSchema });
 
 /**
@@ -325,9 +367,9 @@ const processIds = defineIdFamily({
   version: 1,
   kinds: { process: { prefix: "computer_process" } },
 }).process;
-export const computerProcessIdSchema = z
-  .string()
-  .refine((value) => processIds.is(value));
+export const computerProcessIdSchema = z.lazy(() =>
+  z.string().refine((value) => processIds.is(value)),
+);
 export type ComputerProcessId = z.output<typeof computerProcessIdSchema>;
 /** At most this many processes may be running in one host scope at once. */
 export const maximumRunningProcesses = 16;
@@ -411,10 +453,12 @@ export type ComputerProcess = z.output<typeof computerProcessSchema>;
 export const processListOutputSchema = z.strictObject({
   processes: z.array(computerProcessSchema).max(maximumProcessRecords),
 });
-export const processKillOutputSchema = z.strictObject({
-  process: computerProcessSchema,
-  signalled: z.boolean(),
-});
+export const processKillOutputSchema = z.lazy(() =>
+  z.strictObject({
+    process: computerProcessSchema,
+    signalled: z.boolean(),
+  }),
+);
 
 /** No process with this id was started on this Computer. */
 export class ComputerProcessNotFoundError extends Error {

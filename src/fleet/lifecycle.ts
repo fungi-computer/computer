@@ -62,12 +62,9 @@ export type FleetLifecyclePorts = Readonly<{
 
 const vmRecycleAfterMs = 23 * 60 * 60 * 1_000;
 const vmRecycleQuietMs = 30_000;
-const runtimeWatchSchema = z.coerce
-  .number()
-  .int()
-  .min(1_000)
-  .max(3_600_000)
-  .catch(60_000);
+const runtimeWatchSchema = z.lazy(() =>
+  z.coerce.number().int().min(1_000).max(3_600_000).catch(60_000),
+);
 function runtimeWatchDelay(
   delivered: boolean,
   running: number,

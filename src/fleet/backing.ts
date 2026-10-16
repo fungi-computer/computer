@@ -21,15 +21,17 @@ import {
 } from "./wire.js";
 
 const maximumLocalBackends = 8;
-const localRowSchema = z.strictObject({
-  computer_id: z.string(),
-  device_id: z.string(),
-  actor_id: z.string(),
-  public_key: z.string(),
-  host_label: z.string(),
-  folder_label: z.string(),
-  request_id: z.string(),
-});
+const localRowSchema = z.lazy(() =>
+  z.strictObject({
+    computer_id: z.string(),
+    device_id: z.string(),
+    actor_id: z.string(),
+    public_key: z.string(),
+    host_label: z.string(),
+    folder_label: z.string(),
+    request_id: z.string(),
+  }),
+);
 type LocalRow = z.output<typeof localRowSchema>;
 
 function mintDeviceId(): string {

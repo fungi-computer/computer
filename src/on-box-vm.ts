@@ -62,15 +62,19 @@ function accessHeaders(env: OnBoxVmEnv) {
   };
 }
 
-const hostIdSchema = z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/);
-const hostRegistrySchema = z.record(
-  hostIdSchema,
-  z.strictObject({
-    origin: z
-      .url({ protocol: /^https?$/ })
-      .transform((value) => new URL(value).origin),
-    publicKey: z.base64().length(44),
-  }),
+const hostIdSchema = z.lazy(() =>
+  z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/),
+);
+const hostRegistrySchema = z.lazy(() =>
+  z.record(
+    hostIdSchema,
+    z.strictObject({
+      origin: z
+        .url({ protocol: /^https?$/ })
+        .transform((value) => new URL(value).origin),
+      publicKey: z.base64().length(44),
+    }),
+  ),
 );
 type HostRegistry = z.infer<typeof hostRegistrySchema>;
 
@@ -145,10 +149,12 @@ const vmHostAudience = (hostId: string) => `computer-vm-host:${hostId}`;
 /** The audience this Worker's ingress door verifies. */
 const vmIngressAudience = "computer-vm-ingress";
 
-const exitSchema = z.strictObject({
-  reason: z.string().max(1_024),
-  exitedAt: z.number().int().nonnegative(),
-});
+const exitSchema = z.lazy(() =>
+  z.strictObject({
+    reason: z.string().max(1_024),
+    exitedAt: z.number().int().nonnegative(),
+  }),
+);
 const vmStateSchema = z.strictObject({
   running: z.boolean(),
   runtimeId: z.string().min(1).max(128).nullable(),
@@ -163,9 +169,11 @@ const vmInventorySchema = z.array(
   }),
 );
 export type OnBoxVmInventory = z.infer<typeof vmInventorySchema>;
-const vmStartSchema = z.strictObject({
-  runtimeId: z.string().min(1).max(128),
-});
+const vmStartSchema = z.lazy(() =>
+  z.strictObject({
+    runtimeId: z.string().min(1).max(128),
+  }),
+);
 
 type VmOperation = "status" | "start" | "restart" | "destroy" | "intercept";
 

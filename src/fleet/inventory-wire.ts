@@ -15,10 +15,12 @@ export type ComputerCreateRequest = Readonly<{
   requestId: string;
 }>;
 /** Inventory pages retain stable ordering and a bounded response. */
-export const computerPageSchema = z.strictObject({
-  limit: z.number().int().min(1).max(100).default(100),
-  offset: z.number().int().nonnegative().default(0),
-});
+export const computerPageSchema = z.lazy(() =>
+  z.strictObject({
+    limit: z.number().int().min(1).max(100).default(100),
+    offset: z.number().int().nonnegative().default(0),
+  }),
+);
 export type ComputerPage = z.input<typeof computerPageSchema>;
 /** Inventory failures, independent of a host's public error mapping. */
 export class ComputerInventoryError extends Error {

@@ -1,5 +1,19 @@
 # @fungi.computer/computer
 
+## 0.1.0
+
+### Minor Changes
+
+- Changes since 0.0.1:
+
+  - perf(computer): build schemas on first use, not at import
+  - feat(oyster): public release 0.1.0
+
+### Patch Changes
+
+- Updated dependencies
+  - @fungi.computer/knapsack@0.1.0
+
 ## 0.0.1
 
 ### Patch Changes

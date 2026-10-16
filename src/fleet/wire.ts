@@ -57,14 +57,16 @@ export const computerStateSchema = z.discriminatedUnion("state", [
 export type ComputerRuntimeState = z.output<typeof computerStateSchema>;
 
 /** Hosted fallback order, with the same bound and identity law as the retained owner. */
-export const hostedBackingsSchema = z
-  .array(hostedBackingSchema)
-  .max(4)
-  .refine(
-    (backings) =>
-      new Set(backings.map(attachedBackendId)).size === backings.length,
-    "hosted backings must be distinct",
-  );
+export const hostedBackingsSchema = z.lazy(() =>
+  z
+    .array(hostedBackingSchema)
+    .max(4)
+    .refine(
+      (backings) =>
+        new Set(backings.map(attachedBackendId)).size === backings.length,
+      "hosted backings must be distinct",
+    ),
+);
 
 /** The host delivers this complete revision to its Computer runtime. */
 export type ComputerBackendsProjection = Readonly<{
@@ -74,10 +76,12 @@ export type ComputerBackendsProjection = Readonly<{
 }>;
 
 /** An explicit override, or the fleet default when no Computer is selected. */
-export const computerBackingChangeSchema = z.strictObject({
-  computerId: z.string().min(1).max(256).optional(),
-  backings: hostedBackingsSchema.nullable(),
-});
+export const computerBackingChangeSchema = z.lazy(() =>
+  z.strictObject({
+    computerId: z.string().min(1).max(256).optional(),
+    backings: hostedBackingsSchema.nullable(),
+  }),
+);
 export type ComputerBackingChange = Readonly<{
   computerId?: string | undefined;
   backings: readonly z.output<typeof hostedBackingSchema>[] | null;
@@ -108,10 +112,12 @@ export const localBackendAttachSchema = z.strictObject({
   requestId: z.string().min(1).max(256),
 });
 export type LocalBackendAttachInput = z.output<typeof localBackendAttachSchema>;
-export const localBackendDetachSchema = z.strictObject({
-  computerId: z.string().min(1).max(256),
-  backendId: z.string().regex(/^local-[a-z2-7]{16}$/),
-});
+export const localBackendDetachSchema = z.lazy(() =>
+  z.strictObject({
+    computerId: z.string().min(1).max(256),
+    backendId: z.string().regex(/^local-[a-z2-7]{16}$/),
+  }),
+);
 /** Recover a lost attach response without retaining the device key. */
 export const localBackendDetachRequestSchema = z.strictObject({
   computerId: localBackendAttachSchema.shape.computerId,
@@ -148,40 +154,42 @@ export type ComputerUsageInterval = Readonly<{
 const timestamp = z.number().int().nonnegative();
 
 /** Observations, not billing decisions. The host owns delivery and settlement. */
-export const computerFactSchema = z.discriminatedUnion("kind", [
-  z.strictObject({
-    ...factIdentity,
-    kind: z.literal("process.exited"),
-    requestId: z.string().min(1),
-    exitCode: z.number().int().nullable(),
-    /** Null means the backend did not measure CPU; it does not mean zero usage. */
-    cpuTimeMs: z.number().nonnegative().nullable(),
-    wallTimeMs: z.number().nonnegative(),
-  }),
-  z.strictObject({
-    ...factIdentity,
-    kind: z.literal("files.written"),
-    path: pathSchema,
-    bytes: z.number().int().nonnegative(),
-  }),
-  z.strictObject({
-    ...factIdentity,
-    kind: z.literal("egress"),
-    /** Only the destination host; URLs may carry credentials in paths or queries. */
-    host: z.string().min(1),
-    method: z.string().min(1),
-    status: z.number().int().min(100).max(599),
-  }),
-  z.strictObject({
-    ...factIdentity,
-    kind: z.literal("lifecycle"),
-    observedAt: timestamp,
-    state: computerStateSchema,
-  }),
-  z.strictObject({
-    ...factIdentity,
-    kind: z.literal("interval"),
-    ...computerUsageIntervalSchema.shape,
-  }),
-]);
+export const computerFactSchema = z.lazy(() =>
+  z.discriminatedUnion("kind", [
+    z.strictObject({
+      ...factIdentity,
+      kind: z.literal("process.exited"),
+      requestId: z.string().min(1),
+      exitCode: z.number().int().nullable(),
+      /** Null means the backend did not measure CPU; it does not mean zero usage. */
+      cpuTimeMs: z.number().nonnegative().nullable(),
+      wallTimeMs: z.number().nonnegative(),
+    }),
+    z.strictObject({
+      ...factIdentity,
+      kind: z.literal("files.written"),
+      path: pathSchema,
+      bytes: z.number().int().nonnegative(),
+    }),
+    z.strictObject({
+      ...factIdentity,
+      kind: z.literal("egress"),
+      /** Only the destination host; URLs may carry credentials in paths or queries. */
+      host: z.string().min(1),
+      method: z.string().min(1),
+      status: z.number().int().min(100).max(599),
+    }),
+    z.strictObject({
+      ...factIdentity,
+      kind: z.literal("lifecycle"),
+      observedAt: timestamp,
+      state: computerStateSchema,
+    }),
+    z.strictObject({
+      ...factIdentity,
+      kind: z.literal("interval"),
+      ...computerUsageIntervalSchema.shape,
+    }),
+  ]),
+);
 export type ComputerFact = z.output<typeof computerFactSchema>;
