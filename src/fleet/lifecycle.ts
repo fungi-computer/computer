@@ -106,6 +106,14 @@ export class FleetLifecycle {
   get recycleRuntimeId(): string | undefined {
     return this.#recycleRuntimeId;
   }
+  /** A successful stop cannot race an admitted boot or in-flight operation. */
+  get hasPendingOperations(): boolean {
+    return (
+      this.#hostedOperations > 0 ||
+      this.#startingHosted > 0 ||
+      this.#recycling !== undefined
+    );
+  }
   takeFacts(): FleetLifecycleFact[] {
     const facts = this.#facts;
     this.#facts = [];
@@ -115,11 +123,32 @@ export class FleetLifecycle {
     this.#facts.push({ kind: "diagnostic", event, code, cause });
   }
   /** Keep pending starts visible while the host obtains admission and capacity. */
-  beginHostedStart(): () => void {
+  private beginHostedStart(): () => void {
     this.#startingHosted++;
     return () => {
       this.#startingHosted--;
     };
+  }
+
+  /** Start the selected hosted backend under the host's admission and slot policy. */
+  async startHostedComputer(
+    admitted: (
+      backing: HostedBacking,
+      run: () => Promise<void>,
+    ) => Promise<void>,
+  ) {
+    const hosted = this.ports.backend.requireHostedRoute();
+    const finish = this.beginHostedStart();
+    try {
+      await admitted(hosted.backing, async () => {
+        await this.ports.backend.workspace().push(hosted.id);
+      });
+      if (!(await this.ports.backend.containerRunning(hosted.backing)))
+        throw new Error("Hosted Computer disconnected while starting");
+      return { state: "running" as const };
+    } finally {
+      finish();
+    }
   }
 
   /** Read liveness without waking a sleeping backend. Queue state wins over booting. */

@@ -33,7 +33,7 @@ export async function assembleComputerImage() {
   if (!sourceStat.isFile())
     throw new Error(`Computer image assembly input is not a file: ${from}`);
   await copyFile(from, to);
-  console.log(`computer image assembly: copied ${from} -> ${to}`);
+  console.error(`computer image assembly: copied ${from} -> ${to}`);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

@@ -114,3 +114,47 @@ test("a successful native patch with pending Workspace sync is a visible failure
     );
     assert.match(result.stderr, /Earlier patch writes may remain/u);
   }));
+
+function finishedWorkspace(stdout, disposed) {
+  return {
+    runtime: {
+      exec: async () => ({
+        result: async () => ({
+          status: "completed",
+          exitCode: 0,
+          stdout,
+          stderr: "",
+          sync: { status: "complete" },
+        }),
+        [Symbol.dispose]() {
+          disposed.push(true);
+        },
+      }),
+    },
+  };
+}
+
+test("an oversized patch stream is cut with a visible marker and a typed truncated entry", async () => {
+  const total = 200 * 1_024;
+  const disposed = [];
+  const result = await applyWorkspacePatch(
+    finishedWorkspace("o".repeat(total), disposed),
+    "hosted:vm",
+    { patch },
+  );
+  assert.ok(Array.isArray(result.truncated));
+  assert.equal(result.truncated.length, 1);
+  assert.equal(result.truncated[0].stream, "stdout");
+  assert.equal(result.truncated[0].totalBytes, total);
+  assert.match(
+    result.stdout,
+    /\n\[fungi: stdout truncated: [\d.]+ KiB of 200\.0 KiB shown; redirect to a file or use head\/tail\]$/u,
+  );
+  const whole = await applyWorkspacePatch(
+    finishedWorkspace("ok", disposed),
+    "hosted:vm",
+    { patch },
+  );
+  assert.equal(whole.truncated, false);
+  assert.equal(disposed.length, 2);
+});

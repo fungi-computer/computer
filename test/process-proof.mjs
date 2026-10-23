@@ -5,26 +5,19 @@
 import assert from "node:assert/strict";
 import process from "node:process";
 import { z } from "zod";
-import { mintComputerRequestId } from "../dist/operation-contract.js";
+import {
+  computerProcessSchema,
+  mintComputerRequestId,
+  processKillOutputSchema,
+  processListOutputSchema,
+} from "@fungi.computer/computer-contract";
 import { proofWorkers } from "./proof-worker.mjs";
 import { proofClient, proofFailure } from "./proof-client.mjs";
 
-const processRow = z.strictObject({
-  id: z.string(),
-  command: z.string(),
-  cwd: z.string().nullable(),
-  port: z.number().int().nullable(),
-  state: z.enum(["running", "exited", "uncertain"]),
-  exitCode: z.number().int().nullable(),
-  sync: z.enum(["synced", "pending"]),
-  startedAt: z.number().int(),
-  endedAt: z.number().int().nullable(),
-});
-const processList = z.strictObject({ processes: z.array(processRow) });
-const killResult = z.strictObject({
-  process: processRow,
-  signalled: z.boolean(),
-});
+// The maintained wire: the proof decodes with the product's own schemas.
+const processRow = computerProcessSchema;
+const processList = processListOutputSchema;
+const killResult = processKillOutputSchema;
 const writeResult = z.strictObject({
   path: z.string(),
   bytes: z.number().int().nonnegative(),
@@ -199,7 +192,7 @@ try {
     await hostStart({
       requestId: mintComputerRequestId(),
       requestScope: "owner:process-proof",
-      command: "mkdir -p /workspace/p/q && echo x > /workspace/p/q/f",
+      command: "mkdir -p /workspace/p/q && printf x > /workspace/p/q/f",
     }),
   );
   const fileSyncSettled = await exited(fileSync.id);

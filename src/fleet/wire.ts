@@ -3,7 +3,7 @@ import {
   computerOperationSchema,
   computerValueSchema,
   pathSchema,
-} from "../operation-contract.js";
+} from "@fungi.computer/computer-contract";
 import {
   attachedBackendId,
   hostedBackingSchema,

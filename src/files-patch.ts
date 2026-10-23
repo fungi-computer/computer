@@ -2,8 +2,8 @@ import type { Workspace } from "@fungi.computer/cloudflare-computer";
 import {
   patchInputSchema,
   patchOutputSchema,
-  maximumStreamBytes,
-} from "./operation-contract.js";
+} from "@fungi.computer/computer-contract";
+import { boundExecStream } from "./exec-output.js";
 
 /** The packaged, pinned Codex engine owns patch parsing and the Workspace jail. */
 const nativePatch = {
@@ -12,16 +12,6 @@ const nativePatch = {
   timeoutMs: 30_000,
   mismatchExitCode: 23,
 };
-
-function bounded(value: string): { value: string; truncated: boolean } {
-  const bytes = new TextEncoder().encode(value);
-  return bytes.length <= maximumStreamBytes
-    ? { value, truncated: false }
-    : {
-        value: new TextDecoder().decode(bytes.slice(0, maximumStreamBytes)),
-        truncated: true,
-      };
-}
 
 /** Await Workspace synchronization even when the native engine reports a partial failure. */
 export async function applyWorkspacePatch(
@@ -40,11 +30,12 @@ export async function applyWorkspacePatch(
   const result = await run.result();
   const synchronizationFailure =
     result.sync.status === "pending" ? result.sync.error : null;
-  const stdout = bounded(result.stdout);
-  const stderr = bounded(
+  const stdout = boundExecStream(result.stdout, "stdout");
+  const stderr = boundExecStream(
     synchronizationFailure !== null
       ? `${result.stderr}\nPatch filesystem synchronization failed: ${synchronizationFailure}. Earlier patch writes may remain.`
       : result.stderr,
+    "stderr",
   );
   const output = {
     status: synchronizationFailure !== null ? "failed" : result.status,
@@ -54,7 +45,10 @@ export async function applyWorkspacePatch(
         : result.exitCode,
     stdout: stdout.value,
     stderr: stderr.value,
-    truncated: stdout.truncated || stderr.truncated,
+    truncated:
+      stdout.truncation.length + stderr.truncation.length === 0
+        ? false
+        : [...stdout.truncation, ...stderr.truncation],
   };
   return patchOutputSchema.parse(
     result.exitCode === nativePatch.mismatchExitCode

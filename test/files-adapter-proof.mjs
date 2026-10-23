@@ -1,4 +1,4 @@
-/* global ReadableStream, TextEncoder, console */
+/* global Buffer, ReadableStream, TextEncoder, console */
 
 import assert from "node:assert/strict";
 
@@ -6,14 +6,23 @@ import { createWorkspaceFilesPort } from "../dist/files.js";
 
 const calls = [];
 const text = new TextEncoder();
+const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const bytesAt = (path) => (path === "/shot.png" ? png : text.encode("hello"));
 const files = {
   async stat(path) {
+    if (path.endsWith("/.gitignore")) {
+      throw Object.assign(new Error("No ignore file"), { code: "ENOENT" });
+    }
     calls.push(["stat", path]);
-    return { isFile: true, size: 5 };
+    return {
+      isFile: path !== "/",
+      isDirectory: path === "/",
+      size: bytesAt(path).byteLength,
+    };
   },
   async readFile(path, options) {
     calls.push(["readFile", path, options]);
-    const bytes = text.encode("hello");
+    const bytes = bytesAt(path);
     const start = options.byteOffset ?? 0;
     const end = start + (options.byteLength ?? bytes.byteLength);
     return new ReadableStream({
@@ -78,26 +87,56 @@ assert.deepEqual(await port.read({ path: "/hello.txt", offset: 0, limit: 4 }), {
   nextOffset: 4,
   truncated: true,
 });
-assert.deepEqual(await port.list({ path: "/", limit: 1 }), {
-  path: "/",
-  entries: [
-    {
-      path: "/a.txt",
-      name: "a.txt",
-      type: "file",
-      size: 5,
-      modifiedAt: 1,
-    },
-  ],
-  truncated: true,
+assert.deepEqual(await port.read({ path: "/shot.png", offset: 0, limit: 4 }), {
+  path: "/shot.png",
+  image: {
+    mimeType: "image/png",
+    data: Buffer.from(png).toString("base64"),
+    bytes: png.byteLength,
+  },
 });
-assert.deepEqual(await port.glob({ path: "/", pattern: "*.txt", limit: 1 }), {
-  path: "/",
-  matches: ["/a.txt"],
-  truncated: true,
+assert.deepEqual(await port.list({ path: ".", limit: 1 }), {
+  path: ".",
+  results: [{ path: "/a.txt", type: "file" }],
+  truncated: "limit",
 });
 assert.deepEqual(
+  await port.glob({
+    path: "/",
+    pattern: "*.txt",
+    limit: 1,
+  }),
+  {
+    path: "/",
+    results: [{ path: "/a.txt", type: "file" }],
+    truncated: "limit",
+  },
+);
+assert.deepEqual(
   await port.grep({
+    path: "/",
+    include: "*.txt",
+    pattern: "hello",
+    regex: false,
+    ignoreCase: false,
+    limit: 1,
+  }),
+  {
+    path: "/",
+    results: [{ path: "/a.txt", line: 1, text: "hello" }],
+    truncated: "limit",
+  },
+);
+assert.deepEqual(
+  await port.rest.glob({ path: "/", pattern: "*.txt", limit: 1 }),
+  {
+    path: "/",
+    matches: ["/a.txt"],
+    truncated: true,
+  },
+);
+assert.deepEqual(
+  await port.rest.grep({
     path: "/",
     pattern: "hello",
     regex: false,
@@ -110,6 +149,43 @@ assert.deepEqual(
     truncated: true,
   },
 );
+// Agent visibility is independent of the SDK's unfiltered search results.
+const ignoredFiles = {
+  ...files,
+  async stat(path) {
+    return {
+      isFile: path !== "/",
+      isDirectory: path === "/",
+      size: text.encode("node_modules/\n").byteLength,
+    };
+  },
+  async readFile() {
+    return new ReadableStream({
+      start(controller) {
+        controller.enqueue(text.encode("node_modules/\n"));
+        controller.close();
+      },
+    });
+  },
+  async find() {
+    return [
+      { path: "/.git/config", type: "file" },
+      { path: "/node_modules/x.js", type: "file" },
+    ];
+  },
+};
+assert.deepEqual(
+  await createWorkspaceFilesPort({ fs: ignoredFiles }, owner).glob({
+    path: "/",
+    pattern: "*",
+    limit: 5,
+  }),
+  {
+    path: "/",
+    results: [],
+    truncated: null,
+  },
+);
 assert.deepEqual(
   await port.replace({
     path: "/hello.txt",
@@ -120,9 +196,23 @@ assert.deepEqual(
 );
 assert.deepEqual(calls, [
   ["stat", "/hello.txt"],
-  ["readFile", "/hello.txt", { byteOffset: 0, byteLength: 4 }],
+  ["readFile", "/hello.txt", { byteOffset: 0, byteLength: 5 }],
+  ["stat", "/shot.png"],
+  ["readFile", "/shot.png", { byteOffset: 0, byteLength: 8 }],
+  ["stat", "/"],
   ["readdir", "/", { limit: 2 }],
+  ["stat", "/"],
   ["find", "/", "*.txt", { limit: 2 }],
+  ["stat", "/"],
+  [
+    "grep",
+    "hello",
+    "/",
+    { regex: false, ignoreCase: false, limit: 2, include: "*.txt" },
+  ],
+  ["stat", "/"],
+  ["find", "/", "*.txt", { limit: 2 }],
+  ["stat", "/"],
   ["grep", "hello", "/", { regex: false, ignoreCase: false, limit: 2 }],
   [
     "replaceFileIfUnchanged",

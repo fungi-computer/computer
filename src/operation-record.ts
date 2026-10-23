@@ -5,7 +5,7 @@ import {
   type ComputerExecOutput,
   type ComputerOperationResult,
   type ComputerRequestId,
-} from "./operation-contract.js";
+} from "@fungi.computer/computer-contract";
 
 /** Terminal status records are retained for 7 days. */
 export const operationRetentionMs = 7 * 24 * 60 * 60 * 1_000;

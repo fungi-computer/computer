@@ -4,13 +4,14 @@ import type {
   WorkspaceBackend,
 } from "@fungi.computer/cloudflare-computer";
 import { newWebSocketRpcSession } from "@fungi.computer/capnweb";
+import type { WatchdogSqliteOwner } from "@fungi.computer/watchdog";
 import {
-  SeamReplayGuard,
   importSeamVerifiers,
   seamHeader,
   verifySeamRequest,
 } from "@fungi.computer/seam";
 import { attachedBackendId, type LocalBackend } from "./computer-backends.js";
+import { createLocalBackendReplayStore } from "./local-backend-replay.js";
 
 /**
  * A member's machine as a Workspace backend.
@@ -143,8 +144,6 @@ export function localBackendAudience(
   return `fungi-local-backend:${computerName}:${backendId}`;
 }
 
-const dialReplay = new SeamReplayGuard();
-
 /**
  * Verify a machine's signed dial-in against the public key its attachment
  * pinned. The WebSocket upgrade carries no body, so it signs an unsigned
@@ -154,6 +153,7 @@ export async function verifyLocalBackendDial(
   request: Request,
   computerName: string,
   backend: LocalBackend,
+  owner: WatchdogSqliteOwner,
 ): Promise<boolean> {
   try {
     await verifySeamRequest(
@@ -163,7 +163,7 @@ export async function verifyLocalBackendDial(
       request.url,
       request.headers.get(seamHeader),
       null,
-      dialReplay,
+      createLocalBackendReplayStore(owner),
     );
     return true;
   } catch (cause) {

@@ -10,7 +10,7 @@ import {
   maximumRunningProcesses,
   mintComputerRequestId,
   processStartInputSchema,
-} from "../dist/operation-contract.js";
+} from "@fungi.computer/computer-contract";
 import {
   ComputerProcessInventory,
   drainProcessExit,

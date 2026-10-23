@@ -18,7 +18,7 @@ import {
   type ComputerProcess,
   type ComputerProcessId,
   type ComputerProcessSync,
-} from "./operation-contract.js";
+} from "@fungi.computer/computer-contract";
 import { ComputerOperationConflictError } from "./operation-record.js";
 
 /** The durable SQLite surface owned by processes and their port exposures. */
@@ -304,7 +304,9 @@ function lostExecution(error: Error): boolean {
 }
 
 /** Classify a failed attach: busy is live, lost is gone, anything else is unknown. */
-function failedObservation(error: Error | undefined): ProcessObservation {
+export function failedObservation(
+  error: Error | undefined,
+): ProcessObservation {
   if (error === undefined) return { state: "uncertain" };
   // computerd admits one live subscriber; the Computer's own watcher holding
   // it proves the execution is still live.

@@ -26,6 +26,10 @@ export {
 export { createFleetInventory } from "./inventory.js";
 export {
   ComputerInventoryError,
+  computerCreateRequestSchema,
+  computerPageSchema,
+  type ComputerCreateRequest,
+  type ComputerPage,
   type FleetActor,
   type FleetComputer,
 } from "./inventory-wire.js";

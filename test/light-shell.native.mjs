@@ -1,7 +1,7 @@
 /* global fetch */
 import assert from "node:assert/strict";
 import console from "node:console";
-import { execOutputSchema } from "../src/operation-contract.ts";
+import { execOutputSchema } from "@fungi.computer/computer-contract";
 import * as z from "zod";
 import process from "node:process";
 import { proofWorkers } from "./proof-worker.mjs";

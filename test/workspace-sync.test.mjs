@@ -1,14 +1,16 @@
 /* global ReadableStream, TextEncoder, EventTarget, Event */
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import { test, before, after } from "node:test";
 import { fileURLToPath, pathToFileURL, URL } from "node:url";
 import { resolve } from "node:path";
 import { build } from "esbuild";
+import { tsImport } from "tsx/esm/api";
 import { newWebSocketRpcSession } from "@fungi.computer/capnweb";
 import { computerTransportBackend } from "../dist/transport-backend.js";
+import { createWorkspaceFilesPort } from "../dist/files.js";
 
 const root = fileURLToPath(new URL("../../..", import.meta.url));
 let directory, Workspace;
@@ -51,6 +53,302 @@ before(async () => {
 });
 after(async () => {
   if (directory) await rm(directory, { recursive: true, force: true });
+});
+
+test("Local and hosted search roots and entries have the same visibility", async (t) => {
+  // Load the real Local adapter through the maintained TS runner, so Computer's
+  // ordinary unit tier does not require an unrelated prebuilt Local dist tree.
+  const { createPrivateInvocationFilesPort } = await tsImport(
+    "../../../runtimes/local/src/private-invocation-files.ts",
+    import.meta.url,
+  );
+  const db = new DatabaseSync(":memory:");
+  const workspace = new Workspace({
+    storage: {
+      sql: {
+        exec(query, ...bindings) {
+          const rows = db.prepare(query).all(...bindings);
+          return { toArray: () => rows };
+        },
+      },
+    },
+  });
+  const localRoot = await mkdtemp(resolve(directory, "local-visibility-"));
+  try {
+    for (const path of [
+      ".git",
+      ".git/nested",
+      "src",
+      "src/.git",
+      "build",
+      "build/sub",
+    ]) {
+      await workspace.fs.mkdir(`/${path}`);
+      await mkdir(resolve(localRoot, path));
+    }
+    for (const [path, content] of [
+      [".gitignore", "build/\n*.log\n"],
+      [".git/config", "needle"],
+      [".git/nested/config", "needle"],
+      ["src/.git/config", "needle"],
+      ["build/hidden.txt", "needle"],
+      ["build/sub/hidden.txt", "needle"],
+      ["build/.gitignore", "!hidden.txt\n!sub/\n"],
+      ["hidden.log", "needle"],
+      ["visible.txt", "needle"],
+      [".gitlike", "needle"],
+    ]) {
+      await workspace.fs.writeFile(`/${path}`, content);
+      await writeFile(resolve(localRoot, path), content);
+    }
+    const adapters = [
+      ["Local", await createPrivateInvocationFilesPort(localRoot)],
+      [
+        "hosted",
+        createWorkspaceFilesPort(workspace, {
+          replaceFileIfUnchanged: () => {
+            throw new Error("Search must not write");
+          },
+        }),
+      ],
+    ];
+    // One case set and fixture for BOTH real adapters, not matching fake ports.
+    const cases = [
+      ...[".git", ".git/nested", "src/.git", "build", "build/sub"].flatMap(
+        (path) => [
+          ["list", { path, limit: 100 }],
+          ["glob", { path, pattern: "**/*", limit: 100 }],
+          [
+            "grep",
+            {
+              path,
+              pattern: "needle",
+              regex: false,
+              ignoreCase: false,
+              limit: 100,
+            },
+          ],
+        ],
+      ),
+      ...[
+        ".git/config",
+        "src/.git/config",
+        "build/hidden.txt",
+        "hidden.log",
+      ].flatMap((path) => [
+        ["list", { path, limit: 100 }],
+        ["glob", { path, pattern: "**/*", limit: 100 }],
+        [
+          "grep",
+          {
+            path,
+            pattern: "needle",
+            regex: false,
+            ignoreCase: false,
+            limit: 100,
+          },
+        ],
+      ]),
+    ];
+    const context = {
+      executionId: "search-visibility-parity",
+      deadlineAt: null,
+      signal: new globalThis.AbortController().signal,
+    };
+    for (const [adapter, port] of adapters) {
+      for (const [operation, input] of cases) {
+        await t.test(`${adapter} ${operation} ${input.path}`, async () => {
+          assert.deepEqual(await port[operation](input, context), {
+            path: input.path,
+            results: [],
+            truncated: null,
+          });
+          if (adapter === "hosted") {
+            // All principals share these REST methods, with their existing wire.
+            const restInput =
+              operation === "list" ? { ...input, offset: 0 } : input;
+            assert.deepEqual(
+              await port.rest[operation](restInput),
+              operation === "list"
+                ? { path: input.path, entries: [], nextOffset: null }
+                : { path: input.path, matches: [], truncated: false },
+            );
+          }
+        });
+      }
+      await t.test(
+        `${adapter} visible entries and exact hidden reads remain available`,
+        async () => {
+          const output = await port.glob(
+            { path: ".", pattern: "**/*.txt", limit: 100 },
+            context,
+          );
+          assert.deepEqual(
+            output.results.map((entry) => entry.path.replace(/^\//, "")).sort(),
+            ["visible.txt"],
+          );
+          assert.deepEqual(
+            (await port.list({ path: ".", limit: 100 }, context)).results
+              .map((entry) => entry.path.replace(/^\//, ""))
+              .sort(),
+            [".gitignore", ".gitlike", "src", "visible.txt"],
+          );
+          for (const path of [
+            ".git/config",
+            "build/hidden.txt",
+            "hidden.log",
+          ]) {
+            // Exact reads retain each adapter's native locator (Workspace is absolute).
+            const readPath = adapter === "hosted" ? `/${path}` : path;
+            assert.equal(
+              (
+                await port.read(
+                  { path: readPath, offset: 0, limit: 100 },
+                  context,
+                )
+              ).content,
+              "needle",
+            );
+          }
+        },
+      );
+    }
+  } finally {
+    await workspace.close();
+    db.close();
+  }
+});
+
+test("Agent and shared REST search skip Git metadata and gitignored files with unchanged wire shapes", async () => {
+  const db = new DatabaseSync(":memory:");
+  const workspace = new Workspace({
+    storage: {
+      sql: {
+        exec(query, ...bindings) {
+          const rows = db.prepare(query).all(...bindings);
+          return { toArray: () => rows };
+        },
+      },
+    },
+  });
+  try {
+    for (const path of ["/.git", "/build", "/src", "/src/.git"]) {
+      await workspace.fs.mkdir(path);
+    }
+    for (const [path, content] of [
+      ["/.gitignore", "build/\n*.log\n"],
+      ["/.git/config", "needle"],
+      ["/build/hidden.txt", "needle"],
+      ["/build/.gitignore", "!hidden.txt\n"],
+      ["/hidden.log", "needle"],
+      ["/visible.txt", "needle"],
+      ["/src/.gitignore", "!keep.log\n"],
+      ["/src/keep.log", "needle"],
+      ["/src/hidden.log", "needle"],
+      ["/src/.git/config", "needle"],
+    ]) {
+      await workspace.fs.writeFile(path, content);
+    }
+    const port = createWorkspaceFilesPort(workspace, {
+      replaceFileIfUnchanged: () => {
+        throw new Error("Search must not write");
+      },
+    });
+    const expected = ["/src/keep.log", "/visible.txt"];
+    assert.deepEqual(
+      (await port.glob({ path: "/", pattern: "**/*", limit: 100 })).results
+        .filter(
+          (entry) =>
+            entry.type === "file" && !entry.path.endsWith(".gitignore"),
+        )
+        .map((entry) => entry.path),
+      expected,
+    );
+    const grep = {
+      path: "/",
+      pattern: "needle",
+      regex: false,
+      ignoreCase: false,
+      limit: 100,
+    };
+    assert.deepEqual(
+      (await port.grep(grep)).results.map((entry) => entry.path),
+      expected,
+    );
+    assert.deepEqual(
+      (await port.list({ path: "/", limit: 100 })).results.map(
+        (entry) => entry.path,
+      ),
+      ["/.gitignore", "/src", "/visible.txt"],
+    );
+    assert.equal((await port.grep({ ...grep, limit: 1 })).truncated, "limit");
+    assert.deepEqual(
+      (await port.grep({ ...grep, limit: 1 })).results.map(
+        (entry) => entry.path,
+      ),
+      ["/src/keep.log"],
+    );
+    assert.deepEqual(
+      (await port.grep({ ...grep, include: "**/*.log" })).results.map(
+        (entry) => entry.path,
+      ),
+      ["/src/keep.log"],
+    );
+    assert.deepEqual(
+      (await port.rest.grep(grep)).matches.map((entry) => entry.path),
+      expected,
+    );
+    assert.deepEqual(
+      (await port.rest.glob({ path: "/", pattern: "**/*.log", limit: 100 }))
+        .matches,
+      ["/src/keep.log"],
+    );
+    const first = await port.rest.list({ path: "/", limit: 1, offset: 0 });
+    assert.deepEqual(
+      first.entries.map((entry) => entry.name),
+      [".gitignore"],
+    );
+    assert.equal(first.nextOffset, 1);
+    const second = await port.rest.list({
+      path: "/",
+      limit: 1,
+      offset: first.nextOffset,
+    });
+    assert.deepEqual(
+      second.entries.map((entry) => entry.name),
+      ["src"],
+    );
+    assert.equal(second.nextOffset, 2);
+    const last = await port.rest.list({
+      path: "/",
+      limit: 1,
+      offset: second.nextOffset,
+    });
+    assert.deepEqual(
+      last.entries.map((entry) => entry.name),
+      ["visible.txt"],
+    );
+    assert.equal(last.nextOffset, null);
+    assert.equal(
+      (await port.read({ path: "/.git/config", offset: 0, limit: 100 }))
+        .content,
+      "needle",
+    );
+    // Rules are captured per invocation, not cached across workspace edits.
+    await workspace.fs.writeFile("/.gitignore", "build/\n*.log\nvisible.txt\n");
+    assert.deepEqual(
+      (await port.grep(grep)).results.map((entry) => entry.path),
+      ["/src/keep.log"],
+    );
+    await workspace.fs.writeFile("/.gitignore", "x".repeat(128 * 1024 + 1));
+    await assert.rejects(
+      port.glob({ path: "/", pattern: "**/*", limit: 100 }),
+      /ignore rules exceed the search byte bound/,
+    );
+  } finally {
+    await workspace.close();
+    db.close();
+  }
 });
 
 function stream(values) {

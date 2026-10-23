@@ -6,7 +6,7 @@ import { test } from "node:test";
 
 import { v7 } from "uuid";
 
-import { computerRequestIdSchema } from "../dist/operation-contract.js";
+import { computerRequestIdSchema } from "@fungi.computer/computer-contract";
 import {
   ComputerOperationConflictError,
   ComputerOperationLimitError,

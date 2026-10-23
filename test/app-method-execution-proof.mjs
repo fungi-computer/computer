@@ -1,7 +1,7 @@
 /* global fetch, console */
 import assert from "node:assert/strict";
 import { setTimeout as delay } from "node:timers/promises";
-import { mintComputerRequestId } from "../dist/operation-contract.js";
+import { mintComputerRequestId } from "@fungi.computer/computer-contract";
 import { proofWorkers } from "./proof-worker.mjs";
 
 const workers = await proofWorkers("computer-app-method-proof");

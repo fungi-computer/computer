@@ -62,12 +62,6 @@ export const attachedBackendsSchema = z.lazy(() =>
     ),
 );
 
-export const attachedBackendIdSchema = z.lazy(() =>
-  z
-    .string()
-    .regex(/^(container|vm-[a-z0-9][a-z0-9-]{0,62}|local-[a-z2-7]{16})$/),
-);
-
 export type AttachedBackendStatus = "ready" | "online" | "offline";
 
 /** What a Computer reports about one attached backend. */

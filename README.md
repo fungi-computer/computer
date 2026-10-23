@@ -13,6 +13,13 @@ from `@fungi.computer/computer/fleet/wire`, and backing descriptions from
 declarations. The `./fleet` lifecycle and main Computer entry require the host
 runtime's Cloudflare Workers types.
 
+The packed stranger check exercises these Node-safe entries and the egress
+helpers after a cold install of the runtime closure. The fork's companion check
+parses the published shell-module groups used by the Computer image with Acorn
+and checks their declarations. Neither check starts a Computer, executes a
+Worker shell, or qualifies the Worker/Workspace/Git SDK in a Node type
+environment.
+
 `@fungi.computer/computer/fleet` owns the host-neutral grant check, backing
 records and fact contracts. A host authenticates its caller and supplies a
 `ComputerGrant`: one Computer, explicit actions, an expiry, optional host-owned
@@ -82,11 +89,11 @@ publish an App or replace a production Computer image.
 SQLite provider. Files belong to that workspace, not to a running shell process.
 A file read can work with no available execution backend.
 
-[Operation contracts](src/operation-contract.ts) declare discovery, bounded file
-reads/writes, directories, command execution, processes and port exposure. The
-[Files adapter](src/files.ts) implements the same read and compare/replace
-contract for Agent tools. Failed containment, conflicting contents and reserved
-ports remain explicit errors.
+[Operation contracts](../computer-contract/README.md), in their own package,
+declare discovery, bounded file reads/writes, directories, command execution,
+processes and port exposure. The [Files adapter](src/files.ts) implements the
+same read and compare/replace contract for Agent tools. Failed containment,
+conflicting contents and reserved ports remain explicit errors.
 
 An execution request carries a replay key. The
 [operation record](src/operation-record.ts) admits the immutable input and
@@ -129,6 +136,27 @@ with that member's OS access. [On-box VM support](src/on-box-vm.ts) adapts a
 registered host to the Workspace backend interface. Platform containers use the
 maintained Cloudflare container backend. Neither backend label nor a green
 container fixture certifies an installed VM host or production routing.
+
+Local dial verification binds Seam's replay-admission port to the existing
+Computer Durable Object's SQLite database. That database is the receiver
+namespace across reconstruction, shared by its attached devices; nonce identity
+inside it is nonce-only. One native transaction prunes only strictly expired
+records, refuses duplicates or the private 4,096-record ceiling, and commits the
+nonce before admission succeeds. Seam owns the inclusive retention deadline;
+duplicates never renew it and capacity never evicts live history. Storage
+failure refuses admission without a process-local fallback. Attachment,
+device-key, signature, audience and revocation authority remain unchanged.
+
+`createLocalBackendReplayStore(owner)` is exported for another native Local-dial
+receiver that uses its own existing SQLite owner, including a Team machine-link
+receiver. The caller owns pins, audience, membership and revocation; this store
+owns only atomic, bounded nonce retention. It neither creates a Computer nor
+shares nonce history across separate databases.
+
+`test:unit` includes the `machine-link-reopen-replay` proof: two physical Node
+processes call the actual local-dial verifier against the same SQLite file. This
+proves reconstructed-process replay refusal, not a complete HTTP/WebSocket
+route, deployed host or container-health acceptance.
 
 ## Processes, ports and lifetime
 
@@ -196,11 +224,11 @@ were saved in a hosted Computer. Do not copy its temporary output into source.
 ## Proof and reference
 
 [package.json](package.json) declares the private entrypoints `.` and `./files`,
-`./backing`, `./host-config`, `./operations`.
-[Runtime proof](test/runtime-proof.mjs) checks native workspace operations and
-reconstruction. [Process proof](test/process-proof.mjs) checks retained process
-identity against the real container.
-[Terminal proof](test/terminal-container-proof.mjs),
+`./backing`, `./host-config`. Operation schemas come from
+`@fungi.computer/computer-contract`. [Runtime proof](test/runtime-proof.mjs)
+checks native workspace operations and reconstruction.
+[Process proof](test/process-proof.mjs) checks retained process identity against
+the real container. [Terminal proof](test/terminal-container-proof.mjs),
 [resource proof](test/container-resource-proof.mjs) and
 [backend tests](test/computer-backends.test.mjs) cover their separate
 boundaries. The declared nightly egress proof is separate from the ordinary

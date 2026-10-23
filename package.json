@@ -1,6 +1,6 @@
 {
   "name": "@fungi.computer/computer",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "Levi <levi@technomancy.dev>",
   "description": "Cloudflare Computer host for one durable Fungi Computer",
   "type": "module",
@@ -27,10 +27,6 @@
       "types": "./dist/host-config.d.ts",
       "import": "./dist/host-config.js"
     },
-    "./operations": {
-      "types": "./dist/operation-contract.d.ts",
-      "import": "./dist/operation-contract.js"
-    },
     "./container-policy": {
       "types": "./dist/container-policy.d.ts",
       "import": "./dist/container-policy.js"
@@ -46,10 +42,6 @@
     "./egress": {
       "types": "./dist/egress-policy.d.ts",
       "import": "./dist/egress-policy.js"
-    },
-    "./light-shell": {
-      "types": "./dist/light-shell.d.ts",
-      "import": "./dist/light-shell.js"
     }
   },
   "files": [
@@ -65,41 +57,42 @@
     "build": "pnpm run clean && tsc -p tsconfig.build.json && node scripts/copy-daemon.mjs",
     "build:native": "fungi-apply-patch-build --out native/bin",
     "clean": "node --input-type=module --eval \"import { rm } from 'node:fs/promises'; await rm('dist', { recursive: true, force: true });\"",
-    "test": "pnpm run test:unit && pnpm run test:fleet-native && node test/port-proof.mjs && node test/terminal-container-proof.mjs && node test/fuse-startup-proof.mjs && node test/container-resource-proof.mjs && node test/runtime-proof.mjs && node test/process-schema-proof.mjs && node test/process-proof.mjs && node test/terminal-proof.mjs && pnpm run test:app-method-execution",
+    "test": "pnpm run test:unit && pnpm run test:fleet-native && node test/port-proof.mjs && node test/terminal-container-proof.mjs && node test/fuse-startup-proof.mjs && node test/container-resource-proof.mjs && node test/runtime-proof.mjs && node test/process-schema-proof.mjs && node test/process-proof.mjs && node test/terminal-proof.mjs && pnpm run test:app-method-execution && pnpm run test:execution-lifecycle",
     "format:check": "node ../../tooling/repository/scripts/format-package-check.mjs",
     "lint:anti-slop": "node ../../tooling/repository/scripts/lint-package-anti-slop.mjs",
     "test:merge": "pnpm run test",
     "test:nightly": "bash ../../.agents/skills/orchestrate-multi-lane-work/scripts/run-proof.sh node test/egress-proof.mjs",
     "test:app-method-execution": "node test/app-method-execution-proof.mjs",
-    "test:unit": "node --test test/egress-policy.test.mjs test/preview.test.mjs test/light-shell.test.mjs test/fleet.test.mjs test/proof-worker.test.mjs test/workspace-sync.test.mjs test/files-patch.test.mjs && node test/reserved-ports.test.mjs && node --test test/seam-signature.test.mjs test/computer-backends.test.mjs test/terminal-welcome.test.mjs && node test/terminal-protocol.test.mjs && node test/container-policy.test.mjs && node test/files-adapter-proof.mjs && node test/operation-record-proof.mjs && node test/process-inventory-proof.mjs",
+    "test:execution-lifecycle": "node test/execution-lifecycle-proof.mjs",
+    "test:unit": "node --test test/egress-policy.test.mjs test/preview.test.mjs test/fleet.test.mjs test/proof-worker.test.mjs test/workspace-sync.test.mjs test/files-patch.test.mjs test/exec-output.test.mjs && node --test test/seam-signature.test.mjs test/local-backend-replay.test.mjs test/machine-link-reopen-replay.test.mjs test/computer-backends.test.mjs test/terminal-welcome.test.mjs test/on-box-vm.test.mjs && node test/terminal-protocol.test.mjs && node test/container-policy.test.mjs && node test/files-adapter-proof.mjs && node test/operation-record-proof.mjs && node test/process-inventory-proof.mjs",
     "test:fleet-native": "node test/fleet.native.mjs",
-    "test:light-shell": "node --test test/light-shell.test.mjs",
     "test:light-shell:native": "node --import tsx test/light-shell.native.mjs --state",
     "prepack": "node scripts/assemble-image.mjs",
     "assemble:image": "node scripts/assemble-image.mjs"
   },
   "dependencies": {
     "@fungi.computer/cairn": "workspace:*",
+    "@fungi.computer/capnweb": "workspace:*",
     "@fungi.computer/cloudflare-computer": "workspace:*",
     "@fungi.computer/cordyceps": "workspace:*",
     "@fungi.computer/knapsack": "workspace:*",
-    "@fungi.computer/capnweb": "workspace:*",
-    "effect": "4.0.2",
-    "zod": "4.4.3",
     "@fungi.computer/seam": "workspace:*",
     "@fungi.computer/watchdog": "workspace:*",
-    "just-bash": "3.4.2"
+    "@fungi.computer/computer-contract": "workspace:*",
+    "effect": "4.0.2",
+    "just-bash": "3.4.2",
+    "zod": "4.4.3"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20260828.1",
     "@types/node": "24.13.3",
     "esbuild": "0.28.2",
-    "typescript": "5.9.3",
-    "uuid": "11.1.1",
-    "wrangler": "4.127.1",
     "eslint": "10.9.1",
     "oxlint": "1.78.0",
-    "tsx": "4.23.12"
+    "tsx": "4.23.12",
+    "typescript": "5.9.3",
+    "uuid": "11.1.1",
+    "wrangler": "4.127.1"
   },
   "botanical": {
     "role": "runtime",

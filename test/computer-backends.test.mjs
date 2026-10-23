@@ -80,7 +80,7 @@ test("an explicit backend never falls back", () => {
   );
 });
 
-test("terminals, processes and ports route to hosted backends only", () => {
+test("hosted operations never run on a local backend", () => {
   assert.equal(
     routeComputerBackend(
       [laptop, container],
@@ -94,6 +94,17 @@ test("terminals, processes and ports route to hosted backends only", () => {
       need: "hosted",
     }),
     { kind: "no_backend" },
+  );
+  assert.deepEqual(
+    routeComputerBackend(
+      [laptop, container],
+      online("local-abcdefghijklmnop"),
+      { backend: "local-abcdefghijklmnop", need: "hosted" },
+    ),
+    {
+      kind: "backend_unavailable",
+      id: "local-abcdefghijklmnop",
+    },
   );
 });
 

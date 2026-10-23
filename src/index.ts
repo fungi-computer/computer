@@ -1,3 +1,6 @@
+import { boundExecStream } from "./exec-output.js";
+export { createLocalBackendReplayStore } from "./local-backend-replay.js";
+import { computerInternetAccess } from "./internet-access.js";
 import {
   getWorkspace,
   SQLiteWorkspaceProvider,
@@ -23,6 +26,8 @@ import {
 } from "@fungi.computer/cloudflare-computer/backends/container";
 import { DurableObject } from "cloudflare:workers";
 import type { FilesPort } from "@fungi.computer/knapsack";
+import * as Effect from "effect/Effect";
+import * as Redacted from "effect/Redacted";
 import { z } from "zod";
 import { SystemTrustContainerBackend } from "./container-system-trust.js";
 import { computerTransportBackend } from "./transport-backend.js";
@@ -51,13 +56,16 @@ import {
   computerExecutionRequestSchema,
   genericComputerExecutionBudget,
   type ComputerExecutionBudget,
+  type ComputerExecutionCarriage,
+  type ComputerExecutionCloseReason,
+  type ComputerExecutionHostHooks,
+  type ComputerExecutionInvocation,
   mintComputerRequestId,
   type ComputerExecRequest,
   type ComputerOperationResult,
   listInputSchema,
   listOutputSchema,
   maximumFileBytes,
-  maximumStreamBytes,
   mkdirInputSchema,
   mkdirOutputSchema,
   readInputSchema,
@@ -81,15 +89,21 @@ import {
   type ComputerProcess,
   type ComputerProcessId,
   type ComputerProcessSync,
-} from "./operation-contract.js";
+} from "@fungi.computer/computer-contract";
 
-import { createWorkspaceFilesPort, readBoundedWorkspaceText } from "./files.js";
+import {
+  createWorkspaceFilesPort,
+  readBoundedWorkspaceText,
+  listWorkspaceFiles,
+} from "./files.js";
 import { computerExecutionResult } from "./execution-result.js";
 import { ComputerOperationRecord } from "./operation-record.js";
+import { createComputerExecutionLifecycle } from "./execution-lifecycle.js";
 import { applyWorkspacePatch } from "./files-patch.js";
 import {
   ComputerProcessInventory,
   drainProcessExit,
+  failedObservation,
   observeProcess,
   type ProcessObservation,
   type ProcessRuntime,
@@ -126,6 +140,13 @@ import {
   localBackendDialPath,
   verifyLocalBackendDial,
 } from "./local-backend.js";
+
+type ComputerExecutionLifecycle = ReturnType<
+  typeof createComputerExecutionLifecycle
+>;
+type ComputerExecutionRecord = NonNullable<
+  ReturnType<ComputerExecutionLifecycle["get"]>
+>;
 
 const computerBinding = "COMPUTER";
 const utf8 = new TextEncoder();
@@ -190,26 +211,6 @@ export type ComputerNamespace = Readonly<{
   getByName: (name: string) => ComputerRpc;
 }>;
 
-function entryType(entry: {
-  readonly isFile: boolean;
-  readonly isDirectory: boolean;
-}): "file" | "directory" | "symlink" {
-  if (entry.isFile) return "file";
-  if (entry.isDirectory) return "directory";
-  return "symlink";
-}
-
-function truncate(value: string) {
-  const bytes = utf8.encode(value);
-  if (bytes.byteLength <= maximumStreamBytes) {
-    return { value, truncated: false };
-  }
-  return {
-    value: new TextDecoder().decode(bytes.slice(0, maximumStreamBytes)),
-    truncated: true,
-  };
-}
-
 async function read(workspace: Workspace, input: ComputerValue) {
   const { path } = readInputSchema.parse(input);
   const stat = await workspace.fs.stat(path);
@@ -224,21 +225,9 @@ async function read(workspace: Workspace, input: ComputerValue) {
 }
 
 async function list(workspace: Workspace, input: ComputerValue) {
-  const { path, limit, offset } = listInputSchema.parse(input);
-  const rows = await workspace.fs.readdir(path, {
-    limit: limit + 1,
-    offset,
-  });
-  return listOutputSchema.parse({
-    path,
-    entries: rows.slice(0, limit).map((entry) => ({
-      name: entry.name,
-      size: entry.size,
-      modifiedAt: entry.mtime,
-      type: entryType(entry),
-    })),
-    nextOffset: rows.length > limit ? offset + limit : null,
-  });
+  return listOutputSchema.parse(
+    await listWorkspaceFiles(workspace, listInputSchema.parse(input)),
+  );
 }
 
 async function mkdir(workspace: Workspace, input: ComputerValue) {
@@ -261,6 +250,12 @@ async function exec(
   input: ComputerExecInput,
   backend: string | undefined,
   signal?: AbortSignal,
+  execution?: Readonly<{
+    invocation: ComputerExecutionInvocation;
+    carriage: ComputerExecutionCarriage;
+    dispatch(): void;
+    opened(): void;
+  }>,
 ) {
   // The host request has already been decoded under its admitted budget.
   const { command, cwd, timeoutMs } = input;
@@ -269,17 +264,25 @@ async function exec(
     cwd === undefined
       ? { encoding: "utf8" as const, timeoutMs, ...backendOption }
       : { encoding: "utf8" as const, timeoutMs, cwd, ...backendOption };
-  using run = await workspace.runtime.exec(command, options);
+  const nativeOptions: WorkspaceRuntimeExecOptions<"utf8"> = {
+    ...options,
+    ...execution?.carriage,
+  };
+  if (execution !== undefined) nativeOptions.id = execution.invocation.id;
+  execution?.dispatch();
+  using run = await workspace.runtime.exec(command, nativeOptions);
+  execution?.opened();
   const result = await computerExecutionResult(run, signal);
   const synchronizationFailure =
     result.sync.status === "pending"
       ? `Computer command filesystem synchronization failed: ${result.sync.error}`
       : null;
-  const stdout = truncate(result.stdout);
-  const stderr = truncate(
+  const stdout = boundExecStream(result.stdout, "stdout");
+  const stderr = boundExecStream(
     synchronizationFailure === null
       ? result.stderr
       : `${synchronizationFailure}${result.stderr.length === 0 ? "" : `\n${result.stderr}`}`,
+    "stderr",
   );
   return execOutputSchema.parse({
     status: synchronizationFailure === null ? result.status : "failed",
@@ -289,7 +292,10 @@ async function exec(
         : result.exitCode,
     stdout: stdout.value,
     stderr: stderr.value,
-    truncated: stdout.truncated || stderr.truncated,
+    truncated:
+      stdout.truncation.length + stderr.truncation.length === 0
+        ? false
+        : [...stdout.truncation, ...stderr.truncation],
   });
 }
 
@@ -300,6 +306,12 @@ function processRuntime(workspace: Workspace, backend: string): ProcessRuntime {
       workspace.runtime.getExec(id, { ...options, backend }),
   };
 }
+
+type PendingProcessStart = {
+  cancelled: boolean;
+  dispatch?: Promise<WorkspaceRuntimeExecHandle<"utf8">>;
+  signal?: Promise<boolean>;
+};
 
 /** Cloudflare bindings required by the first durable Computer host. */
 export type ComputerEnv = OnBoxVmEnv &
@@ -435,7 +447,12 @@ class ContainerComputer extends ContainerComputerBase {
     if (
       backend === undefined ||
       computerName !== this.state.id.name ||
-      !(await verifyLocalBackendDial(request, computerName, backend))
+      !(await verifyLocalBackendDial(
+        request,
+        computerName,
+        backend,
+        this.state.storage,
+      ))
     )
       return new Response(null, { status: 404 });
     // A verified plain request lets the machine tell attached from detached.
@@ -474,10 +491,12 @@ class ContainerComputer extends ContainerComputerBase {
    * The hosted backend that terminals, processes and ports use: the first in
    * the default order, or none when only local machines are attached.
    */
-  protected hostedRoute():
-    Readonly<{ id: string; backing: HostedBacking }> | undefined {
+  protected hostedRoute(
+    backend?: string,
+  ): Readonly<{ id: string; backing: HostedBacking }> | undefined {
     const route = routeComputerBackend(this.attachedBackends(), () => false, {
       need: "hosted",
+      backend,
     });
     if (route.kind !== "routed" || route.backend.kind === "local")
       return undefined;
@@ -653,9 +672,8 @@ class ContainerComputer extends ContainerComputerBase {
 
   /**
    * The current Workspace once its mount index is ready and its guest mount
-   * root exists. Every backend mounts `/workspace`, so a host write there
-   * (such as a Workflow step's one-shot Git credential file) must not depend
-   * on a guest having booted first.
+   * root exists. Every backend mounts `/workspace`, so an ordinary host file
+   * write there must not depend on a guest having booted first.
    */
   protected async readyWorkspace(): Promise<Workspace> {
     const workspace = this.workspace();
@@ -695,9 +713,22 @@ class ContainerComputer extends ContainerComputerBase {
 
 /** One upstream Cloudflare Workspace that advertises and runs its capabilities. */
 export class ComputerDO extends ContainerComputer {
+  constructor(ctx: DurableObjectState, env: ComputerEnv) {
+    super(ctx, env);
+    // Reconstruction revokes unfinished exec authority before the first RPC.
+    void this.#executions;
+  }
+
+  /** Host-admitted settings write; egress reads the current durable value. */
+  internetAccess(enabled?: boolean): boolean {
+    return computerInternetAccess(this.state.storage.sql, enabled);
+  }
+
   #binaryFileTail: Promise<undefined> = Promise.resolve(undefined);
   #operationRecord: ComputerOperationRecord | undefined;
   #processRecord: ComputerProcessInventory | undefined;
+  #executionRecord: ComputerExecutionLifecycle | undefined;
+  readonly #processStarts = new Map<string, PendingProcessStart>();
   #terminalSync: Promise<void> | undefined;
 
   get #processes(): ComputerProcessInventory {
@@ -714,6 +745,147 @@ export class ComputerDO extends ContainerComputer {
       () => Date.now(),
     );
     return this.#operationRecord;
+  }
+
+  /** Ordinary Computers have no credential host; resource hosts override it. */
+  protected executionHooks(): ComputerExecutionHostHooks | undefined {
+    return undefined;
+  }
+
+  get #executions(): ComputerExecutionLifecycle {
+    if (this.#executionRecord === undefined) {
+      // Initialize the existing retention owners before their dependent table.
+      void this.#operations;
+      void this.#processes;
+      const executions = createComputerExecutionLifecycle(this.state.storage);
+      this.#executionRecord = executions;
+      for (const interrupted of executions.reconstructed) {
+        if (interrupted.invocation.kind === "process") {
+          // An opening process never crossed the synchronous SDK fence.
+          const { id } = processIdInputSchema.parse({
+            id: interrupted.invocation.id,
+          });
+          this.#processes.release(id);
+        }
+        this.state.waitUntil(
+          Promise.resolve().then(() =>
+            this.#deliverExecutionClose(interrupted, "reconstructed"),
+          ),
+        );
+      }
+    }
+    return this.#executionRecord;
+  }
+
+  async #deliverExecutionClose(
+    record: ComputerExecutionRecord,
+    reason: ComputerExecutionCloseReason,
+    hooks?: ComputerExecutionHostHooks,
+  ): Promise<void> {
+    try {
+      await (hooks ?? this.executionHooks())?.close(
+        record.invocation,
+        record.context,
+        reason,
+      );
+    } catch (cause) {
+      // A host error may contain credential-bearing transport data.
+      Effect.runSync(
+        Effect.logError(
+          "Computer host execution close is unavailable",
+          Redacted.make(cause),
+        ),
+      );
+    }
+  }
+
+  async #closeExecution(
+    id: string,
+    reason: ComputerExecutionCloseReason,
+    hooks?: ComputerExecutionHostHooks,
+  ): Promise<void> {
+    const record = this.#executions.close(id, reason);
+    if (record !== undefined)
+      await this.#deliverExecutionClose(record, reason, hooks);
+  }
+
+  /**
+   * Admission observes the actual native subscriber, never App completion,
+   * output silence, an accepted signal or this isolate's warm state.
+   */
+  async executionIsLive(invocationId: string): Promise<boolean> {
+    const record = this.#executions.get(invocationId);
+    if (
+      record === undefined ||
+      record.phase === "closed" ||
+      record.phase === "opening" ||
+      (record.phase === "open" && !record.nativeOpened) ||
+      (record.phase === "dispatching" &&
+        (record.invocation.kind !== "process" ||
+          this.#processStarts.has(invocationId)))
+    )
+      return false;
+    let route: Readonly<{ id: string; backing: HostedBacking }>;
+    try {
+      const selected = this.hostedRoute(record.backend);
+      if (selected === undefined)
+        throw new ComputerBackendUnavailableError("no_backend");
+      route = selected;
+    } catch {
+      await this.#closeExecution(invocationId, "unknown");
+      return false;
+    }
+    let workspace: Workspace;
+    try {
+      if (!(await this.containerRunning(route.backing))) {
+        if (record.nativeOpened)
+          await this.#closeExecution(invocationId, "native_exit");
+        return false;
+      }
+      workspace = await this.readyWorkspace();
+    } catch {
+      return false;
+    }
+    const runtime = processRuntime(workspace, route.id);
+    let observed: ProcessObservation;
+    let archivedExit = false;
+    try {
+      // Hold both handles unread. A live execution admits only one subscriber;
+      // two successful gets therefore prove archived native completion.
+      using first = await runtime.getExec(invocationId, { resume: "tail" });
+      void first;
+      using second = await runtime.getExec(invocationId, { resume: "tail" });
+      void second;
+      archivedExit = true;
+      observed = { state: "exited", exitCode: null, sync: "unknown" };
+    } catch (cause) {
+      observed = failedObservation(cause instanceof Error ? cause : undefined);
+    }
+    if (observed.state === "running") {
+      this.#executions.opened(invocationId);
+      return this.#executions.get(invocationId)?.phase === "open";
+    }
+    if (observed.state === "exited" && (record.nativeOpened || archivedExit))
+      await this.#closeExecution(invocationId, "native_exit");
+    return false;
+  }
+
+  /** Caller-driven renewal only; a Git HTTP liveness check never renews. */
+  async #renewExecution(invocationId: string): Promise<void> {
+    const record = this.#executions.get(invocationId);
+    if (record === undefined || !(await this.executionIsLive(invocationId)))
+      return;
+    try {
+      await this.executionHooks()?.renew(record.invocation, record.context);
+    } catch (cause) {
+      await this.#closeExecution(invocationId, "unknown");
+      Effect.runSync(
+        Effect.logError(
+          "Computer host execution renewal is unavailable",
+          Redacted.make(cause),
+        ),
+      );
+    }
   }
 
   #ensureExposedPorts(): void {
@@ -1144,6 +1316,7 @@ export class ComputerDO extends ContainerComputer {
     capabilityId: ComputerValue,
     input: ComputerValue,
     accept: () => void,
+    executionContext?: ComputerValue,
   ): Promise<ComputerValue> {
     const selected = capabilityNameSchema.parse(capabilityId);
     if (selected === "bash" || selected === "exec") {
@@ -1157,12 +1330,19 @@ export class ComputerDO extends ContainerComputer {
           },
           () => undefined,
           selected,
+          undefined,
+          undefined,
+          executionContext,
         ),
       );
     }
     switch (selected) {
       case "start_process":
-        return await this.startProcessAfterAcceptance(input, accept);
+        return await this.startProcessAfterAcceptance(
+          input,
+          accept,
+          executionContext,
+        );
       case "list_processes":
         return await this.listProcessesAfterAcceptance(accept);
       case "kill_process":
@@ -1196,23 +1376,34 @@ export class ComputerDO extends ContainerComputer {
    * Execute a host request once, after the host accepts current authority.
    * `exec` runs on the Workspace's built-in Worker shell unless it names an
    * attached backend; `bash` always runs on an attached backend, the named one
-   * or the first available in the default order.
+   * or the first available in the default order. Host-only `hosted` execution
+   * excludes local backends, including an explicitly named local backend.
    */
   protected async executeOperationAfterAcceptance(
     input: ComputerExecRequest,
     accept: () => void,
-    kind: "exec" | "bash",
+    kind: "exec" | "bash" | "hosted",
     budget: ComputerExecutionBudget = genericComputerExecutionBudget,
     signal?: AbortSignal,
+    executionContext?: ComputerValue,
   ): Promise<ComputerOperationResult> {
     const { requestId, ...command } =
       computerExecutionRequestSchema(budget).parse(input);
     const route =
       kind === "exec" && command.backend === undefined
         ? undefined
-        : this.routeBackend(command.backend, "exec");
+        : this.routeBackend(
+            command.backend,
+            kind === "hosted" ? "hosted" : "exec",
+          );
+    if (executionContext !== undefined) {
+      if (route === undefined)
+        throw new Error("Host execution requires a hosted native backend");
+      // Keep the selected backend; never redirect credential-bearing work from
+      // a local backend to a different hosted one.
+      this.routeBackend(route.id, "hosted");
+    }
     const run = async () => {
-      const workspace = await this.readyWorkspace();
       const inputHash = await sha256(
         JSON.stringify({
           kind,
@@ -1225,20 +1416,72 @@ export class ComputerDO extends ContainerComputer {
       const operations: ComputerOperationRecord = this.#operations;
       signal?.throwIfAborted();
       const recorded = operations.admit(requestId, inputHash, accept);
-      if (recorded !== undefined) return recorded;
+      if (recorded !== undefined) {
+        if (executionContext !== undefined)
+          await this.#renewExecution(`exec:${requestId}`);
+        return recorded;
+      }
       operations.markRunning(requestId);
+      let hooks: ComputerExecutionHostHooks | undefined;
+      const invocation: ComputerExecutionInvocation = {
+        id: `exec:${requestId}`,
+        kind: "exec",
+      };
+      let completed = false;
       try {
-        operations.settle(
-          requestId,
-          await exec(workspace, command, route?.id, signal),
+        const workspace = await this.readyWorkspace();
+        hooks =
+          executionContext === undefined ? undefined : this.executionHooks();
+        let execution;
+        if (executionContext !== undefined) {
+          if (hooks === undefined || route === undefined)
+            throw new Error("Computer host execution is unavailable");
+          this.#executions.begin(invocation, route.id, executionContext);
+          // The host's last awaited authority fence follows NEW admission.
+          const carriage = await hooks.open(invocation, executionContext);
+          execution = {
+            invocation,
+            carriage,
+            dispatch: () => {
+              signal?.throwIfAborted();
+              this.#executions.dispatch(invocation.id);
+            },
+            opened: () => {
+              this.#executions.opened(invocation.id);
+            },
+          };
+        }
+        const output = await exec(
+          workspace,
+          command,
+          route?.id,
+          signal,
+          execution,
         );
+        completed = true;
+        operations.settle(requestId, output);
       } catch (cause) {
         operations.settleUnknown(
           requestId,
-          cause instanceof Error
-            ? `${cause.name}: ${cause.message}`
-            : "Computer execution rejected without an Error",
+          executionContext !== undefined
+            ? "Computer hosted execution outcome is unavailable"
+            : cause instanceof Error
+              ? `${cause.name}: ${cause.message}`
+              : "Computer execution rejected without an Error",
         );
+      } finally {
+        if (hooks !== undefined && executionContext !== undefined) {
+          const phase = this.#executions.get(invocation.id)?.phase;
+          await this.#closeExecution(
+            invocation.id,
+            completed
+              ? "native_exit"
+              : phase === "dispatching" || phase === "open"
+                ? "unknown"
+                : "refused_start",
+            hooks,
+          );
+        }
       }
       return operations.status(requestId, () => undefined);
     };
@@ -1268,6 +1511,7 @@ export class ComputerDO extends ContainerComputer {
   protected async startProcessAfterAcceptance(
     input: ComputerValue,
     accept: () => void,
+    executionContext?: ComputerValue,
   ): Promise<ComputerProcess> {
     const start = processStartInputSchema.parse(input);
     const { command, cwd } = start;
@@ -1275,15 +1519,30 @@ export class ComputerDO extends ContainerComputer {
       JSON.stringify({ command, cwd: cwd ?? null, port: start.port ?? null }),
     );
     const replay = this.#processes.replay(start, inputHash, accept);
-    if (replay !== undefined) return replay;
+    if (replay !== undefined) {
+      if (executionContext !== undefined) await this.#renewExecution(replay.id);
+      return this.#processReceipt(replay, executionContext !== undefined);
+    }
     if (start.port !== undefined && isComputerReservedPort(start.port))
       throw new ComputerPortReservedError(start.port);
     const backend = this.requireHostedRoute().id;
     const workspace = await this.readyWorkspace();
     const admission = this.#processes.admit(start, inputHash, accept);
-    if (!admission.created) return admission.process;
+    if (!admission.created) {
+      if (executionContext !== undefined)
+        await this.#renewExecution(admission.process.id);
+      return this.#processReceipt(
+        admission.process,
+        executionContext !== undefined,
+      );
+    }
     const admitted = admission.process;
     const id = admitted.id;
+    const invocation: ComputerExecutionInvocation = { id, kind: "process" };
+    const control: PendingProcessStart = { cancelled: false };
+    this.#processStarts.set(id, control);
+    let hooks: ComputerExecutionHostHooks | undefined;
+    let dispatched = false;
     let run: WorkspaceRuntimeExecHandle<"utf8">;
     try {
       // timeoutMs 0 disables computerd's default 320 s command deadline.
@@ -1294,8 +1553,37 @@ export class ComputerDO extends ContainerComputer {
         timeoutMs: 0,
       };
       if (cwd !== undefined) options.cwd = cwd;
-      run = await workspace.runtime.exec(command, options);
+      if (executionContext !== undefined) {
+        hooks = this.executionHooks();
+        if (hooks === undefined)
+          throw new Error("Computer host execution is unavailable");
+        this.#executions.begin(invocation, backend, executionContext);
+        const carriage = await hooks.open(invocation, executionContext);
+        if (carriage.env !== undefined) options.env = carriage.env;
+        if (carriage.stdin !== undefined) options.stdin = carriage.stdin;
+      }
+      // No awaited work belongs between this fence and the SDK invocation.
+      if (control.cancelled)
+        throw new Error("Computer process start was cancelled");
+      if (executionContext !== undefined) this.#executions.dispatch(id);
+      dispatched = true;
+      control.dispatch = workspace.runtime.exec(command, options);
+      run = await control.dispatch;
+      if (executionContext !== undefined) this.#executions.opened(id);
     } catch (error) {
+      if (executionContext !== undefined) {
+        await this.#closeExecution(
+          id,
+          dispatched ? "unknown" : "refused_start",
+          hooks,
+        );
+        if (!dispatched) {
+          this.#processes.release(id);
+          throw error;
+        }
+        // A failed dispatch reply is not proof that native spawn failed.
+        return this.#settle(id, { state: "uncertain" });
+      }
       // A transport failure after dispatch may still have started it.
       const observed = await observeProcess(
         processRuntime(workspace, backend),
@@ -1306,9 +1594,23 @@ export class ComputerDO extends ContainerComputer {
         throw error;
       }
       return this.#settle(id, observed);
+    } finally {
+      this.#processStarts.delete(id);
     }
     this.state.waitUntil(this.#watchProcess(id, run));
     return admitted;
+  }
+
+  #processReceipt(
+    process: ComputerProcess,
+    requiresContext = false,
+  ): ComputerProcess {
+    const execution = this.#executions.get(process.id);
+    return process.state === "running" &&
+      (execution?.phase === "closed" ||
+        (requiresContext && execution === undefined))
+      ? { ...process, state: "uncertain" }
+      : process;
   }
 
   /** List this Computer's processes, reconciling live ones with computerd. */
@@ -1326,27 +1628,11 @@ export class ComputerDO extends ContainerComputer {
       return processListOutputSchema.parse({
         processes: rows.slice(0, maximumProcessRecords),
       });
-    const hosted = this.hostedRoute();
-    if (
-      hosted === undefined ||
-      !(await this.containerRunning(hosted.backing))
-    ) {
-      // No container means none of its processes survived; do not wake it.
-      for (const row of running) this.#processes.exited(row.id, null);
-      return processListOutputSchema.parse({
-        processes: this.#processes.list().slice(0, maximumProcessRecords),
-      });
-    }
-    const workspace = await this.readyWorkspace();
-    const runtime = processRuntime(workspace, hosted.id);
     const observed = new Map(
       await Promise.all(
         running.map(
           async (row) =>
-            [
-              row.id,
-              this.#settle(row.id, await observeProcess(runtime, row.id)),
-            ] as const,
+            [row.id, await this.#observeOwnedProcess(row)] as const,
         ),
       ),
     );
@@ -1355,6 +1641,53 @@ export class ComputerDO extends ContainerComputer {
         .slice(0, maximumProcessRecords)
         .map((row) => observed.get(row.id) ?? row),
     });
+  }
+
+  async #observeOwnedProcess(row: ComputerProcess): Promise<ComputerProcess> {
+    // A reservation or unresolved SDK preparation is not a native exit.
+    if (this.#processStarts.has(row.id)) return { ...row, state: "uncertain" };
+    const execution = this.#executions.get(row.id);
+    let hosted = this.hostedRoute();
+    if (execution !== undefined) {
+      try {
+        hosted = this.hostedRoute(execution.backend);
+        if (hosted === undefined)
+          throw new ComputerBackendUnavailableError("no_backend");
+      } catch {
+        await this.#closeExecution(row.id, "unknown");
+        return { ...row, state: "uncertain" };
+      }
+    }
+    if (
+      hosted === undefined ||
+      !(await this.containerRunning(hosted.backing))
+    ) {
+      // Never wake a stopped backend. Absence before a known native handle
+      // cannot settle a dispatch whose reply was lost.
+      if (execution !== undefined && !execution.nativeOpened)
+        return { ...row, state: "uncertain" };
+      return this.#settle(row.id, {
+        state: "exited",
+        exitCode: null,
+        sync: "unknown",
+      });
+    }
+    const workspace = await this.readyWorkspace();
+    const observed = await observeProcess(
+      processRuntime(workspace, hosted.id),
+      row.id,
+    );
+    if (
+      execution !== undefined &&
+      !execution.nativeOpened &&
+      observed.state === "exited" &&
+      observed.exitCode === null &&
+      observed.sync === "unknown"
+    )
+      return { ...row, state: "uncertain" };
+    const process = this.#settle(row.id, observed);
+    if (observed.state === "running") await this.#renewExecution(row.id);
+    return process;
   }
 
   /** Send SIGTERM to one running process; its exit is recorded when observed. */
@@ -1374,10 +1707,60 @@ export class ComputerDO extends ContainerComputer {
     if (row === undefined) throw new ComputerProcessNotFoundError(id);
     if (row.state !== "running")
       return processKillOutputSchema.parse({ process: row, signalled: false });
-    const hosted = this.hostedRoute();
+    const pending = this.#processStarts.get(id);
+    if (pending !== undefined) {
+      pending.cancelled = true;
+      const dispatch = pending.dispatch;
+      if (dispatch === undefined) {
+        await this.#closeExecution(id, "refused_start");
+        this.#processes.release(id);
+        return processKillOutputSchema.parse({
+          process: this.#processes.get(id),
+          signalled: false,
+        });
+      }
+      // Preparation can still be in flight. Await its actual native handle,
+      // then signal that same invocation; never infer exit from acceptance.
+      pending.signal ??= (async () => {
+        try {
+          const native = await dispatch;
+          await native.kill("SIGTERM");
+          return true;
+        } catch {
+          return false;
+        }
+      })();
+      const signalled = await pending.signal;
+      return processKillOutputSchema.parse({
+        process: this.#processReceipt(this.#processes.get(id) ?? row),
+        signalled,
+      });
+    }
+    const execution = this.#executions.get(id);
+    let hosted = this.hostedRoute();
+    if (execution !== undefined) {
+      try {
+        hosted = this.hostedRoute(execution.backend);
+        if (hosted === undefined)
+          throw new ComputerBackendUnavailableError("no_backend");
+      } catch {
+        await this.#closeExecution(id, "unknown");
+        return processKillOutputSchema.parse({
+          process: { ...row, state: "uncertain" },
+          signalled: false,
+        });
+      }
+    }
     if (hosted === undefined || !(await this.containerRunning(hosted.backing)))
       return processKillOutputSchema.parse({
-        process: this.#processes.exited(id, null),
+        process:
+          execution !== undefined && !execution.nativeOpened
+            ? { ...row, state: "uncertain" }
+            : this.#settle(id, {
+                state: "exited",
+                exitCode: null,
+                sync: "unknown",
+              }),
         signalled: false,
       });
     const workspace = await this.readyWorkspace();
@@ -1387,18 +1770,25 @@ export class ComputerDO extends ContainerComputer {
         signal: "SIGTERM",
       });
     } catch (cause) {
-      console.error("Computer runtime operation failed", cause);
+      if (execution === undefined)
+        console.error("Computer runtime operation failed", cause);
+      else console.error("Computer hosted process signal was not confirmed");
 
-      const observed = await observeProcess(
-        processRuntime(workspace, hosted.id),
-        id,
-      );
       return processKillOutputSchema.parse({
-        process: this.#settle(id, observed),
+        process:
+          execution === undefined
+            ? this.#settle(
+                id,
+                await observeProcess(processRuntime(workspace, hosted.id), id),
+              )
+            : await this.#observeOwnedProcess(row),
         signalled: false,
       });
     }
-    return processKillOutputSchema.parse({ process: row, signalled: true });
+    return processKillOutputSchema.parse({
+      process: this.#processReceipt(this.#processes.get(id) ?? row),
+      signalled: true,
+    });
   }
 
   /**
@@ -1426,7 +1816,17 @@ export class ComputerDO extends ContainerComputer {
     if (observed.state === "exited") {
       if (observed.settleLater !== undefined)
         this.#watchResync(id, observed.settleLater);
-      return this.#processes.exited(id, observed.exitCode, observed.sync);
+      const process = this.#processes.exited(
+        id,
+        observed.exitCode,
+        observed.sync,
+      );
+      const execution = this.#executions.close(id, "native_exit");
+      if (execution !== undefined)
+        this.state.waitUntil(
+          this.#deliverExecutionClose(execution, "native_exit"),
+        );
+      return process;
     }
     const row = this.#processes.get(id);
     if (row === undefined) throw new ComputerProcessNotFoundError(id);
@@ -1448,12 +1848,18 @@ export class ComputerDO extends ContainerComputer {
     try {
       const settled = await drainProcessExit(run);
       if (settled !== undefined) {
-        if (settled.settleLater !== undefined)
-          this.#watchResync(id, settled.settleLater);
-        this.#processes.exited(id, settled.exitCode, settled.sync);
-      }
+        this.#settle(id, {
+          state: "exited",
+          ...settled,
+        });
+      } else await this.#closeExecution(id, "unknown");
     } catch (cause) {
-      console.error("Computer runtime operation failed", cause);
+      if (this.#executions.get(id) === undefined)
+        console.error("Computer runtime operation failed", cause);
+      else {
+        await this.#closeExecution(id, "unknown");
+        console.error("Computer hosted process observation is unavailable");
+      }
 
       // The stream broke (eviction, transport); list reconciles later.
     }
@@ -1612,9 +2018,11 @@ export class ComputerDO extends ContainerComputer {
 export { WorkspaceProxy, WorkspaceServiceProxy };
 export {
   OnBoxVmContainerHost,
+  OnBoxVmTimeoutError,
   onBoxVmPlacement,
   onBoxVmIngress,
   type OnBoxVmEnv,
+  type OnBoxVmOperation,
   type OnBoxVmState,
 } from "./on-box-vm.js";
 export { computerContainerSleepAfterMs } from "./container-policy.js";
@@ -1648,7 +2056,6 @@ export function createComputerFilesPort(computer: ComputerRpc): FilesPort {
 }
 
 export { createWorkspaceFilesPort, type WorkspaceFilesOwner } from "./files.js";
-export * from "./operation-contract.js";
 export {
   ComputerOperationConflictError,
   ComputerOperationLimitError,

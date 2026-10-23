@@ -3,6 +3,7 @@ import type {
   WorkspaceRef,
 } from "@fungi.computer/cloudflare-computer/backends/container";
 import { z } from "zod";
+import * as Data from "effect/Data";
 import {
   SeamReplayGuard,
   importSeamSigner,
@@ -175,7 +176,23 @@ const vmStartSchema = z.lazy(() =>
   }),
 );
 
-type VmOperation = "status" | "start" | "restart" | "destroy" | "intercept";
+export type OnBoxVmOperation =
+  "status" | "start" | "restart" | "destroy" | "intercept" | "inventory";
+
+/** A bounded control-plane wait, not the VM's execution or allocation lifetime. */
+const vmControlTimeoutMs = 60_000;
+
+/** The host's outcome is unknown after a timeout; this is not evidence of offline. */
+export class OnBoxVmTimeoutError extends Data.TaggedError(
+  "OnBoxVmTimeoutError",
+)<{
+  readonly operation: OnBoxVmOperation;
+  readonly timeoutMs: number;
+}> {
+  override get message(): string {
+    return `On-box Computer VM ${this.operation} timed out after ${String(this.timeoutMs)} ms; host outcome unknown`;
+  }
+}
 
 /** The host service's request bodies: a boot, or one interception to install. */
 type VmRequestBody =
@@ -241,21 +258,33 @@ export class OnBoxVmContainerHost implements IWorkspaceContainerAPI {
   }
 
   async #call<T>(
-    operation: VmOperation,
+    operation: OnBoxVmOperation,
     schema: z.ZodType<T>,
     body?: VmRequestBody,
   ): Promise<T> {
-    const path = operation === "status" ? "" : `/${operation}`;
-    const url = `${this.#placement.origin}/vms/${this.#vmId}${path}`;
-    const response = await fetch(
-      url,
-      await signedVmRequest(this.#env, this.#placement, url, body),
-    );
-    if (!response.ok) {
-      const detail = (await response.text()).slice(0, 200);
-      throw new OnBoxVmUnavailableError(operation, response.status, detail);
+    let path = `/vms/${this.#vmId}`;
+    if (operation === "inventory") path = "/vms";
+    else if (operation !== "status") path += `/${operation}`;
+    const url = `${this.#placement.origin}${path}`;
+    const signal = AbortSignal.timeout(vmControlTimeoutMs);
+    try {
+      const response = await fetch(url, {
+        ...(await signedVmRequest(this.#env, this.#placement, url, body)),
+        signal,
+      });
+      if (!response.ok) {
+        const detail = (await response.text()).slice(0, 200);
+        throw new OnBoxVmUnavailableError(operation, response.status, detail);
+      }
+      return schema.parse(await response.json());
+    } catch (cause) {
+      if (signal.aborted)
+        throw new OnBoxVmTimeoutError({
+          operation,
+          timeoutMs: vmControlTimeoutMs,
+        });
+      throw cause;
     }
-    return schema.parse(await response.json());
   }
 
   async #boot(
@@ -272,15 +301,8 @@ export class OnBoxVmContainerHost implements IWorkspaceContainerAPI {
   }
 
   /** Signed host-wide inventory; includes VMs outside this Hub's directory. */
-  async inventory(): Promise<OnBoxVmInventory> {
-    const url = `${this.#placement.origin}/vms`;
-    const response = await fetch(
-      url,
-      await signedVmRequest(this.#env, this.#placement, url, undefined),
-    );
-    if (!response.ok)
-      throw new OnBoxVmUnavailableError("inventory", response.status);
-    return vmInventorySchema.parse(await response.json());
+  inventory(): Promise<OnBoxVmInventory> {
+    return this.#call("inventory", vmInventorySchema);
   }
 
   start(env: Record<string, string>, enableInternet: boolean) {

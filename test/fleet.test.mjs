@@ -4,6 +4,26 @@ import { test } from "node:test";
 import { checkComputerGrant } from "../dist/fleet/index.js";
 import { DatabaseSync } from "node:sqlite";
 import { fromNodeSqlite } from "@fungi.computer/watchdog/node-sqlite";
+import { computerInternetAccess } from "../dist/internet-access.js";
+
+test("a Computer's Internet access defaults on and persists off independently of other Computers", () => {
+  const first = new DatabaseSync(":memory:");
+  const second = new DatabaseSync(":memory:");
+  try {
+    const firstSql = fromNodeSqlite(first).sql;
+    const secondSql = fromNodeSqlite(second).sql;
+    assert.equal(computerInternetAccess(firstSql), true);
+    assert.equal(computerInternetAccess(secondSql), true);
+    assert.equal(computerInternetAccess(firstSql, false), false);
+    // A new storage adapter observes the persisted value, not process state.
+    assert.equal(computerInternetAccess(fromNodeSqlite(first).sql), false);
+    assert.equal(computerInternetAccess(secondSql), true);
+    assert.equal(computerInternetAccess(firstSql, true), true);
+  } finally {
+    first.close();
+    second.close();
+  }
+});
 
 test("usage facts keep their Computer and provenance through delivery acknowledgment", async () => {
   const { ComputerRuntimeUsage } = await import("../dist/fleet/index.js");
@@ -404,6 +424,163 @@ test("fleet lifecycle checks its grant before native execution and returns relea
     assert.deepEqual(fleet.takeFacts(), []);
   } finally {
     database.close();
+  }
+});
+
+test("an empty runtime roster does not hide an in-flight hosted operation", async () => {
+  const { FleetLifecycle } = await import("../dist/fleet/index.js");
+  const database = new DatabaseSync(":memory:");
+  const entered = Promise.withResolvers();
+  const finish = Promise.withResolvers();
+  let running;
+  try {
+    const fleet = new FleetLifecycle({
+      storage: fromNodeSqlite(database),
+      computerId: "pending",
+      backend: { state: { container: { running: false } } },
+    });
+    assert.equal(fleet.hasPendingOperations, false);
+    running = fleet.run(
+      {
+        computerId: "pending",
+        actions: new Set(["start"]),
+        expiresAt: Date.now() + 60_000,
+        provenance: { actor: "owner" },
+      },
+      { kind: "platform-container" },
+      async () => {
+        entered.resolve();
+        await finish.promise;
+      },
+    );
+    await entered.promise;
+    assert.deepEqual(await fleet.stopAll("retirement"), []);
+    assert.equal(fleet.hasPendingOperations, true);
+    finish.resolve();
+    await running;
+    assert.equal(fleet.hasPendingOperations, false);
+  } finally {
+    finish.resolve();
+    await running;
+    database.close();
+  }
+});
+
+test("a recycling restart stays pending across stop readback until its late boot is stopped", async (t) => {
+  const { FleetLifecycle } = await import("../dist/fleet/index.js");
+  let now = 1_000;
+  t.mock.method(Date, "now", () => now);
+  const database = new DatabaseSync(":memory:");
+  const entered = Promise.withResolvers();
+  const finish = Promise.withResolvers();
+  const watches = [];
+  let recycling;
+  let current = { running: true, runtimeId: "old", exit: null };
+  const backing = { kind: "on-box-vm", hostId: "host-one" };
+  try {
+    const fleet = new FleetLifecycle({
+      storage: {
+        ...fromNodeSqlite(database),
+        getAlarm: async () => null,
+        setAlarm: async () => undefined,
+      },
+      alarm: { waitUntil: (work) => watches.push(work) },
+      computerId: "recycling",
+      backend: {
+        state: { id: { toString: () => "recycling" } },
+        onBoxVmHost: () => ({
+          inventory: async () => [
+            {
+              id: "recycling",
+              running: true,
+              runtimeId: "old",
+              lastActive: 1_000,
+            },
+          ],
+          state: async () => current,
+          destroy: async () => {
+            current = { running: false, runtimeId: null, exit: null };
+          },
+        }),
+        syncRecycledWorkspace: async () => undefined,
+        hostedContainerHost: () => ({
+          restart: async () => {
+            entered.resolve();
+            await finish.promise;
+            current = { running: true, runtimeId: "replacement", exit: null };
+            return { runtimeId: "replacement" };
+          },
+        }),
+      },
+    });
+    fleet.containerRuntimeStarted({
+      runtimeId: "old",
+      backing,
+      startedAt: now,
+    });
+    await Promise.all(watches);
+    now += 24 * 60 * 60_000;
+    recycling = fleet.recycle({
+      computerId: "recycling",
+      actions: new Set(["start"]),
+      expiresAt: now + 60_000,
+      provenance: { actor: "owner" },
+    });
+    await entered.promise;
+    assert.deepEqual(await fleet.stopAll("retirement"), []);
+    assert.equal(fleet.hasPendingOperations, true);
+    finish.resolve();
+    await recycling;
+    assert.equal(fleet.hasPendingOperations, false);
+    assert.deepEqual(await fleet.stopAll("retirement retry"), []);
+    assert.equal(current.running, false);
+  } finally {
+    finish.resolve();
+    await recycling;
+    await Promise.all(watches);
+    database.close();
+  }
+});
+
+test("multiple Computers start through the same fleet owner without crossing backend identities", async () => {
+  const { FleetLifecycle } = await import("../dist/fleet/index.js");
+  for (const computerId of ["A", "B"]) {
+    const database = new DatabaseSync(":memory:");
+    try {
+      const calls = [];
+      const backing = { kind: "platform-container" };
+      const fleet = new FleetLifecycle({
+        storage: fromNodeSqlite(database),
+        computerId,
+        backend: {
+          requireHostedRoute: () => ({ backing, id: computerId }),
+          workspace: () => ({
+            push: async (id) => {
+              calls.push(id);
+              return 0;
+            },
+          }),
+          containerRunning: async () => true,
+        },
+      });
+      const admitted = async (selected, run) => {
+        assert.deepEqual(selected, backing);
+        return run();
+      };
+      assert.deepEqual(await fleet.startHostedComputer(admitted), {
+        state: "running",
+      });
+      assert.deepEqual(calls, [computerId]);
+      await assert.rejects(
+        fleet.startHostedComputer(async () => {
+          throw new Error("unfunded");
+        }),
+        /unfunded/,
+      );
+      assert.deepEqual(calls, [computerId]);
+    } finally {
+      database.close();
+    }
   }
 });
 
