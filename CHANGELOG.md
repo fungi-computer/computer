@@ -1,5 +1,17 @@
 # @fungi.computer/computer
 
+## 0.2.1
+
+### Patch Changes
+
+- Changes since 0.2.0:
+
+  - fix(computer): read ignore rules without loading the ai-dependent tools
+    entry
+
+- Updated dependencies
+  - @fungi.computer/cordyceps@0.3.1
+
 ## 0.2.0
 
 ### Minor Changes

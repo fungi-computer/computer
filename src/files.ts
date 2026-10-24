@@ -2,8 +2,8 @@ import type {
   SQLiteWorkspaceProvider,
   WorkspaceClient,
 } from "@fungi.computer/cloudflare-computer";
-import { WorkspaceFileStore } from "@fungi.computer/cloudflare-computer/tools";
 import { posix } from "node:path";
+import { z } from "zod";
 import { SearchVisibility } from "@fungi.computer/knapsack/files-search";
 
 /** Files need only the Workspace filesystem, local or leased through a stub. */
@@ -326,15 +326,30 @@ function workspacePath(path: string): string {
   return path.startsWith("/") ? path : `/${path}`;
 }
 
+const missingSchema = z.object({ code: z.literal("ENOENT") });
+
+/** A regular file's stat, or null when the path is absent or not a file. */
+async function fileStat(
+  workspace: WorkspaceFiles,
+  path: string,
+): Promise<{ size: number } | null> {
+  try {
+    const stat = await workspace.fs.stat(path);
+    return stat.isFile ? stat : null;
+  } catch (error) {
+    if (missingSchema.safeParse(error).success) return null;
+    throw error;
+  }
+}
+
 /** Storage adapter only; shared Files policy owns visibility and grammar. */
 function workspaceSearchVisibility(
   workspace: WorkspaceFiles,
 ): SearchVisibility {
-  const store = new WorkspaceFileStore(workspace);
   let bytes = 0;
   return new SearchVisibility(async (directory) => {
     const path = posix.join("/", directory, ".gitignore");
-    const stat = await store.stat(path);
+    const stat = await fileStat(workspace, path);
     if (stat !== null) {
       // Match Local's bounded text reads; never silently omit unreadable rules.
       if (stat.size > 128 * 1_024 || bytes + stat.size > 64 * 1_024 * 1_024)
