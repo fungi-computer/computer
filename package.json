@@ -1,6 +1,6 @@
 {
   "name": "@fungi.computer/computer",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "author": "Levi <levi@technomancy.dev>",
   "description": "Cloudflare Computer host for one durable Fungi Computer",
   "type": "module",
@@ -57,7 +57,7 @@
     "build": "pnpm run clean && tsc -p tsconfig.build.json && node scripts/copy-daemon.mjs",
     "build:native": "fungi-apply-patch-build --out native/bin",
     "clean": "node --input-type=module --eval \"import { rm } from 'node:fs/promises'; await rm('dist', { recursive: true, force: true });\"",
-    "test": "pnpm run test:unit && pnpm run test:fleet-native && node test/port-proof.mjs && node test/terminal-container-proof.mjs && node test/fuse-startup-proof.mjs && node test/container-resource-proof.mjs && node test/runtime-proof.mjs && node test/process-schema-proof.mjs && node test/process-proof.mjs && node test/terminal-proof.mjs && pnpm run test:app-method-execution && pnpm run test:execution-lifecycle",
+    "test": "pnpm run test:unit && pnpm run test:fleet-native && node test/files-rpc.native.mjs && node test/port-proof.mjs && node test/terminal-container-proof.mjs && node test/fuse-startup-proof.mjs && node test/container-resource-proof.mjs && node test/runtime-proof.mjs && node test/process-schema-proof.mjs && node test/process-proof.mjs && node test/terminal-proof.mjs && pnpm run test:app-method-execution && pnpm run test:execution-lifecycle",
     "format:check": "node ../../tooling/repository/scripts/format-package-check.mjs",
     "lint:anti-slop": "node ../../tooling/repository/scripts/lint-package-anti-slop.mjs",
     "test:merge": "pnpm run test",

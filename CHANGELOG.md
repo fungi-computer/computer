@@ -1,5 +1,17 @@
 # @fungi.computer/computer
 
+## 0.2.2
+
+### Patch Changes
+
+- Changes since 0.2.1:
+
+  - fix(cloudflare-computer): remove Node binary declaration globals
+
+- Updated dependencies
+  - @fungi.computer/knapsack@0.2.1
+  - @fungi.computer/computer-contract@0.0.2
+
 ## 0.2.1
 
 ### Patch Changes

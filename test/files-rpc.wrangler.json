@@ -1,0 +1,10 @@
+{
+  "name": "computer-files-rpc-proof",
+  "main": "files-rpc.fixture.ts",
+  "compatibility_date": "2026-09-04",
+  "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": {
+    "bindings": [{ "name": "FILES", "class_name": "FilesRpcProof" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["FilesRpcProof"] }]
+}

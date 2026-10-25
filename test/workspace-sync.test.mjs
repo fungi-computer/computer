@@ -558,3 +558,51 @@ test("an uncertain dispatch failure never replays the command", async () => {
   assert.equal(proof.commands, 1);
   assert.equal(proof.content, null);
 });
+
+test("provider preserves binary views, ranged I/O and encoded reads", async () => {
+  const db = new DatabaseSync(":memory:");
+  const workspace = new Workspace({
+    storage: {
+      sql: {
+        exec(query, ...bindings) {
+          const rows = db.prepare(query).all(...bindings);
+          return { toArray: () => rows };
+        },
+      },
+    },
+  });
+  try {
+    const provider = workspace.provider();
+    const view = new Uint8Array([99, 0, 127, 255, 99]).subarray(1, 4);
+    await provider.writeFile("/bytes", view);
+    assert.deepEqual([...provider.readFileSync("/bytes")], [0, 127, 255]);
+    assert.equal(provider.readFileSync("/bytes", "hex"), "007fff");
+    assert.equal(
+      await provider.readFile("/bytes", { encoding: "base64" }),
+      "AH//",
+    );
+    assert.deepEqual([...provider.readRangeSync("/bytes", 1, 2)], [127, 255]);
+    assert.equal(provider.writeRangeSync("/bytes", new Uint8Array([1]), 1), 1);
+    assert.deepEqual([...provider.readFileSync("/bytes")], [0, 1, 255]);
+    provider.writeFileRangesSync("/bytes", new Uint8Array([0, 1, 255]), [
+      { start: 0, end: 3 },
+    ]);
+    const fd = provider.openSync("/bytes", "r+");
+    const target = new Uint8Array(5);
+    assert.equal(provider.readSync(fd, target, 1, 3, 0), 3);
+    assert.deepEqual([...target], [0, 0, 1, 255, 0]);
+    assert.equal(provider.writeSync(fd, new Uint8Array([9, 8, 7]), 1, 1, 2), 1);
+    provider.closeSync(fd);
+    assert.deepEqual([...provider.readFileSync("/bytes")], [0, 1, 8]);
+    provider.writeFileSync("/text", "héllo", "utf8");
+    assert.equal(provider.readFileSync("/text", "utf-8"), "héllo");
+    provider.openWriteBufferSync("/text");
+    provider.writeRangeSync("/text", "H", 0);
+    assert.equal(provider.readFileSync("/text", "utf8"), "Héllo");
+    provider.releaseWriteBufferSync("/text");
+    assert.equal(await provider.readFile("/text", "utf8"), "Héllo");
+  } finally {
+    await workspace.close();
+    db.close();
+  }
+});
