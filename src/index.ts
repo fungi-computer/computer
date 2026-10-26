@@ -7,10 +7,10 @@ import {
   Workspace,
   WorkspaceProxy,
   WorkspaceServiceProxy,
+  type WorkspaceStub,
   type WorkspaceRegisteredBackend,
   type WorkspaceRuntimeExecHandle,
   type WorkspaceRuntimeExecOptions,
-  type WorkspaceStubHost,
 } from "@fungi.computer/cloudflare-computer";
 import {
   WorkerShellBackend,
@@ -179,8 +179,16 @@ const terminalQuerySchema = z.lazy(() =>
   }),
 );
 
+/** Files needs only the native Workspace lease and its atomic replacement door. */
+export type ComputerFilesRpc = Readonly<{
+  __getWorkspaceStub(): Promise<WorkspaceStub>;
+  replaceFileIfUnchanged(
+    input: ComputerFileReplacement,
+  ): Promise<ComputerFileReplacementResult>;
+}>;
+
 /** The exact RPC surface of one Computer Durable Object. */
-export type ComputerRpc = WorkspaceStubHost &
+export type ComputerRpc = ComputerFilesRpc &
   Readonly<{
     getCapabilities: ComputerDO["getCapabilities"];
     call: (
@@ -201,9 +209,6 @@ export type ComputerRpc = WorkspaceStubHost &
     unexposePort: (input: {
       port: number;
     }) => Promise<{ port: number; removed: boolean }>;
-    replaceFileIfUnchanged: (
-      input: ComputerFileReplacement,
-    ) => Promise<ComputerFileReplacementResult>;
   }>;
 
 /** The Cloudflare binding projection needed to select one named Computer. */
@@ -712,7 +717,7 @@ class ContainerComputer extends ContainerComputerBase {
 }
 
 /** One upstream Cloudflare Workspace that advertises and runs its capabilities. */
-export class ComputerDO extends ContainerComputer {
+export class ComputerDO extends ContainerComputer implements ComputerFilesRpc {
   constructor(ctx: DurableObjectState, env: ComputerEnv) {
     super(ctx, env);
     // Reconstruction revokes unfinished exec authority before the first RPC.
@@ -2034,7 +2039,9 @@ export {
   verifyLocalBackendDial,
 } from "./local-backend.js";
 /** Keep each native Workspace lease inside the operation that uses it. */
-export function createComputerFilesPort(computer: ComputerRpc): FilesPort {
+export function createComputerFilesPort(
+  computer: ComputerFilesRpc | Rpc.Provider<ComputerFilesRpc>,
+): FilesPort {
   async function withFiles<A>(
     operation: (
       files: ReturnType<typeof createWorkspaceFilesPort>,

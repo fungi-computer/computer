@@ -1,5 +1,27 @@
 # @fungi.computer/computer
 
+## 0.3.0
+
+### Minor Changes
+
+- Changes since 0.2.2:
+
+  - fix(computer): restore isolated replay-store subpath
+  - fix(mesh): close relay custody review gaps
+  - feat(oyster): retain offline machine-link posts
+  - fix(oyster): keep Worker fleet declarations out of Node host types
+  - feat(oyster): attach Agents to named Computers
+
+### Patch Changes
+
+- Updated dependencies
+- Updated dependencies
+- Updated dependencies
+  - @fungi.computer/cordyceps@0.4.0
+  - @fungi.computer/knapsack@0.3.0
+  - @fungi.computer/seam@0.2.0
+  - @fungi.computer/computer-contract@0.0.3
+
 ## 0.2.2
 
 ### Patch Changes

@@ -1,6 +1,6 @@
 {
   "name": "@fungi.computer/computer",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "author": "Levi <levi@technomancy.dev>",
   "description": "Cloudflare Computer host for one durable Fungi Computer",
   "type": "module",
@@ -34,6 +34,10 @@
     "./fleet/wire": {
       "types": "./dist/fleet/wire.d.ts",
       "import": "./dist/fleet/wire.js"
+    },
+    "./fleet/inventory-wire": {
+      "types": "./dist/fleet/inventory-wire.d.ts",
+      "import": "./dist/fleet/inventory-wire.js"
     },
     "./fleet": {
       "types": "./dist/fleet/index.d.ts",
