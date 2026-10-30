@@ -1,4 +1,5 @@
 import { boundExecStream } from "./exec-output.js";
+export type { WorkspaceRuntimeResultOptions } from "@fungi.computer/cloudflare-computer";
 export { createLocalBackendReplayStore } from "./local-backend-replay.js";
 import { computerInternetAccess } from "./internet-access.js";
 import {
@@ -11,6 +12,7 @@ import {
   type WorkspaceRegisteredBackend,
   type WorkspaceRuntimeExecHandle,
   type WorkspaceRuntimeExecOptions,
+  type WorkspaceRuntimeResultOptions,
 } from "@fungi.computer/cloudflare-computer";
 import {
   WorkerShellBackend,
@@ -261,6 +263,7 @@ async function exec(
     dispatch(): void;
     opened(): void;
   }>,
+  resultOptions?: WorkspaceRuntimeResultOptions,
 ) {
   // The host request has already been decoded under its admitted budget.
   const { command, cwd, timeoutMs } = input;
@@ -277,7 +280,7 @@ async function exec(
   execution?.dispatch();
   using run = await workspace.runtime.exec(command, nativeOptions);
   execution?.opened();
-  const result = await computerExecutionResult(run, signal);
+  const result = await computerExecutionResult(run, signal, resultOptions);
   const synchronizationFailure =
     result.sync.status === "pending"
       ? `Computer command filesystem synchronization failed: ${result.sync.error}`
@@ -1391,6 +1394,7 @@ export class ComputerDO extends ContainerComputer implements ComputerFilesRpc {
     budget: ComputerExecutionBudget = genericComputerExecutionBudget,
     signal?: AbortSignal,
     executionContext?: ComputerValue,
+    resultOptions?: WorkspaceRuntimeResultOptions,
   ): Promise<ComputerOperationResult> {
     const { requestId, ...command } =
       computerExecutionRequestSchema(budget).parse(input);
@@ -1462,6 +1466,7 @@ export class ComputerDO extends ContainerComputer implements ComputerFilesRpc {
           route?.id,
           signal,
           execution,
+          resultOptions,
         );
         completed = true;
         operations.settle(requestId, output);

@@ -1,5 +1,18 @@
 # @fungi.computer/computer
 
+## 0.4.0
+
+### Minor Changes
+
+- Changes since 0.3.2:
+
+  - feat(computer): stream tool output through Hub execution
+
+### Patch Changes
+
+- @fungi.computer/knapsack@0.4.1
+  - @fungi.computer/computer-contract@0.0.6
+
 ## 0.3.2
 
 ### Patch Changes

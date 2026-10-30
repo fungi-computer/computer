@@ -1,11 +1,15 @@
-import type { WorkspaceRuntimeExecHandle } from "@fungi.computer/cloudflare-computer";
+import type {
+  WorkspaceRuntimeExecHandle,
+  WorkspaceRuntimeResultOptions,
+} from "@fungi.computer/cloudflare-computer";
 
 /** A host deadline cancels the owned execution, rather than merely abandoning its result. */
 export async function computerExecutionResult(
   run: WorkspaceRuntimeExecHandle<"utf8">,
   signal?: AbortSignal,
+  options?: WorkspaceRuntimeResultOptions,
 ) {
-  if (signal === undefined) return await run.result();
+  if (signal === undefined) return await run.result(options);
   let interrupt: () => void = () => undefined;
   const interrupted = new Promise<{ kind: "interrupted" }>((resolve) => {
     interrupt = () => {
@@ -16,7 +20,7 @@ export async function computerExecutionResult(
   });
   try {
     const result = await Promise.race([
-      run.result().then((value) => ({ kind: "result" as const, value })),
+      run.result(options).then((value) => ({ kind: "result" as const, value })),
       interrupted,
     ]);
     if (result.kind === "result") return result.value;

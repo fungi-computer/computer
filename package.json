@@ -1,6 +1,6 @@
 {
   "name": "@fungi.computer/computer",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "author": "Levi <levi@technomancy.dev>",
   "description": "Cloudflare Computer host for one durable Fungi Computer",
   "type": "module",
@@ -68,7 +68,7 @@
     "test:nightly": "bash ../../.agents/skills/orchestrate-multi-lane-work/scripts/run-proof.sh node test/egress-proof.mjs",
     "test:app-method-execution": "node test/app-method-execution-proof.mjs",
     "test:execution-lifecycle": "node test/execution-lifecycle-proof.mjs",
-    "test:unit": "node --test test/egress-policy.test.mjs test/preview.test.mjs test/fleet.test.mjs test/proof-worker.test.mjs test/workspace-sync.test.mjs test/files-patch.test.mjs test/exec-output.test.mjs && node --test test/seam-signature.test.mjs test/local-backend-replay.test.mjs test/machine-link-reopen-replay.test.mjs test/computer-backends.test.mjs test/terminal-welcome.test.mjs test/on-box-vm.test.mjs && node test/terminal-protocol.test.mjs && node test/container-policy.test.mjs && node test/files-adapter-proof.mjs && node test/operation-record-proof.mjs && node test/process-inventory-proof.mjs",
+    "test:unit": "node --test --test-concurrency=${BOTANICAL_TEST_WORKERS:-4} test/egress-policy.test.mjs test/preview.test.mjs test/fleet.test.mjs test/proof-worker.test.mjs test/workspace-sync.test.mjs test/runtime-observer.test.mjs test/files-patch.test.mjs test/exec-output.test.mjs && node --test --test-concurrency=${BOTANICAL_TEST_WORKERS:-4} test/seam-signature.test.mjs test/local-backend-replay.test.mjs test/machine-link-reopen-replay.test.mjs test/computer-backends.test.mjs test/terminal-welcome.test.mjs test/on-box-vm.test.mjs && node test/terminal-protocol.test.mjs && node test/container-policy.test.mjs && node test/files-adapter-proof.mjs && node test/operation-record-proof.mjs && node test/process-inventory-proof.mjs",
     "test:fleet-native": "node test/fleet.native.mjs",
     "test:light-shell:native": "node --import tsx test/light-shell.native.mjs --state",
     "prepack": "node scripts/assemble-image.mjs",
