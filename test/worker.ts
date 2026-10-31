@@ -1,6 +1,7 @@
 import { z } from "zod";
 import * as Effect from "effect/Effect";
 import * as Redacted from "effect/Redacted";
+import { waitForNativeHandle } from "./native-readiness.js";
 import {
   execRequestSchema,
   computerProcessIdSchema,
@@ -82,6 +83,8 @@ export class ComputerDO extends NativeComputerDO {
   readonly #renewProofs: boolean[] = [];
   #openGate: ReturnType<typeof Promise.withResolvers<undefined>> | undefined;
   #sdkGate: ReturnType<typeof Promise.withResolvers<undefined>> | undefined;
+  #nativeArrival:
+    ReturnType<typeof Promise.withResolvers<undefined>> | undefined;
   #rawNativeAvailable = false;
   #pendingProcess: Promise<void> | undefined;
   #pendingExec: Promise<void> | undefined;
@@ -182,6 +185,8 @@ export class ComputerDO extends NativeComputerDO {
     };
     const nativeReceived = async () => {
       this.#rawNativeAvailable = true;
+      // The SDK has replied; delivery to the Computer owner is still held.
+      this.#nativeArrival?.resolve(undefined);
       await this.#sdkGate?.promise;
     };
     const loseDispatchReply = () => this.#loseDispatchReply;
@@ -494,6 +499,7 @@ export class ComputerDO extends NativeComputerDO {
           "exec-bytes",
           "cancel",
           "pending-sdk-process",
+          "await-native",
           "release-sdk",
           "ignored-term-process",
           "force-stop",
@@ -529,8 +535,10 @@ export class ComputerDO extends NativeComputerDO {
       this.#binaryStdin = action === "exec-bytes";
       if (action === "pending-exec")
         this.#openGate = Promise.withResolvers<undefined>();
-      if (action === "pending-sdk-exec")
+      if (action === "pending-sdk-exec") {
         this.#sdkGate = Promise.withResolvers<undefined>();
+        this.#nativeArrival = Promise.withResolvers<undefined>();
+      }
       const execute: ComputerExecutionHostPort["executeOperationAfterAcceptance"] =
         this.executeOperationAfterAcceptance.bind(this);
       this.#pendingExec = execute(
@@ -576,8 +584,10 @@ export class ComputerDO extends NativeComputerDO {
       this.#refuseOpen = action === "refused-process";
       if (action === "pending-process")
         this.#openGate = Promise.withResolvers<undefined>();
-      if (action === "pending-sdk-process")
+      if (action === "pending-sdk-process") {
         this.#sdkGate = Promise.withResolvers<undefined>();
+        this.#nativeArrival = Promise.withResolvers<undefined>();
+      }
       this.#ignoreTerm = action === "ignored-term-process";
       this.#loseDispatchReply = action === "lost-reply-process";
       if (action === "held-exit-process")
@@ -616,6 +626,12 @@ export class ComputerDO extends NativeComputerDO {
       this.state.waitUntil(this.#pendingProcess);
       if (action !== "pending-process" && action !== "pending-sdk-process")
         await this.#pendingProcess;
+    }
+    if (action === "await-native") {
+      const settled = this.#pendingProcess ?? this.#pendingExec;
+      if (this.#nativeArrival === undefined || settled === undefined)
+        throw new Error("No pending native SDK dispatch to await");
+      await waitForNativeHandle(this.#nativeArrival.promise, settled);
     }
     if (action === "release-open") {
       this.#openGate?.resolve(undefined);

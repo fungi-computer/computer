@@ -418,10 +418,7 @@ test("warm host-open cancellation fences authority with zero native SDK dispatch
 test("pending SDK cancellation awaits the actual raw handle then sends SIGTERM to that invocation", async () => {
   await withExecutionLaw(async ({ call }) => {
     await call("pending-sdk-process");
-    const pending = await observed(
-      call,
-      (snapshot) => snapshot.rawNativeAvailable,
-    );
+    const pending = await call("await-native");
     assert.equal(pending.opens, 1);
     assert.equal(pending.nativeDispatches, 1);
     assert.equal(pending.startSettled, false);
@@ -554,10 +551,7 @@ test("actual spawn with a lost dispatch reply stays uncertain and closed on repl
 test("cold after-dispatch process reconstruction reconciles the actual native invocation", async () => {
   await withExecutionLaw(async ({ call, evict }) => {
     await call("pending-sdk-process");
-    const dispatched = await observed(
-      call,
-      (snapshot) => snapshot.rawNativeAvailable,
-    );
+    const dispatched = await call("await-native");
     assert.equal(dispatched.rawNativeAvailable, true);
     assert.equal(dispatched.nativeDispatches, 1);
     assert.equal(dispatched.startSettled, false);
@@ -614,10 +608,7 @@ test("cold after-dispatch process reconstruction reconciles the actual native in
 test("cold exec after actual dispatch closes without Workspace, probe or redispatch", async () => {
   await withExecutionLaw(async ({ call, evict }) => {
     await call("pending-sdk-exec");
-    const dispatched = await observed(
-      call,
-      (snapshot) => snapshot.rawNativeAvailable,
-    );
+    const dispatched = await call("await-native");
     assert.equal(dispatched.rawNativeAvailable, true);
     assert.equal(dispatched.nativeDispatches, 1);
     assert.equal(dispatched.execSettled, false);

@@ -1,5 +1,16 @@
 # @fungi.computer/computer
 
+## 0.4.1
+
+### Patch Changes
+
+- Changes since 0.4.0:
+
+  - fix(hub): seed writable offline dependencies for native MCP proof
+
+- @fungi.computer/knapsack@0.4.2
+  - @fungi.computer/computer-contract@0.0.7
+
 ## 0.4.0
 
 ### Minor Changes

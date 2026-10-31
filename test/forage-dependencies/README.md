@@ -34,18 +34,26 @@ PY
 ```
 
 Use the repository's bounded proof runner and the shared execution window for
-Docker commands. Build the dependency layer using pnpm's ordinary fetch store:
+Docker commands. Build the dependency layer using pnpm's ordinary frozen
+install. The image retains both its content-addressable store and registry
+metadata cache, including the metadata needed by offline supply-chain checks:
 
 ```sh
 docker build --tag botanical-forage-dependencies:2ff54dd \
   --file packages/computer/test/forage-dependencies.Dockerfile \
+  --build-arg FORAGE_SOURCE_REVISION="$(git rev-parse 25408429035cb19deaa87d1f736ddc6374484770)" \
+  --build-arg FORAGE_SOURCE_MANIFEST_SHA256="$(sha256sum packages/computer/test/forage-dependencies/source-manifest.json | cut -d' ' -f1)" \
+  --build-arg FORAGE_DEPENDENCY_RECIPE_SHA256="$(sha256sum packages/computer/test/forage-dependencies.Dockerfile | cut -d' ' -f1)" \
   --build-context forage=.botanical/forage-offline-reproduction/packages/forage \
   packages/computer/test/forage-dependencies
 ```
 
-Run the actual package build with no network. The install copies packages from
-the image store into this run's own node_modules. Lifecycle scripts are disabled
-for the dependency install; the explicit Forage build and smoke scripts run.
+Run the actual package build with no network. Copy the image's store and cache
+seeds into disposable writable space: pnpm writes its SQLite index even offline,
+and Computer commands run unprivileged. The install copies packages into this
+run's own node_modules. Lifecycle scripts are disabled for the dependency
+install; the explicit Forage build and smoke scripts run. Supply-chain policy
+checks remain enabled.
 
 ```sh
 docker run --rm --network none --entrypoint sh \
@@ -53,8 +61,13 @@ docker run --rm --network none --entrypoint sh \
   --workdir /workspace botanical-forage-dependencies:2ff54dd -eu -c '
     test ! -e packages/forage/dist
     cp /opt/forage-dependencies/pnpm-lock.yaml packages/forage/pnpm-lock.yaml
+    install_root=$(mktemp -d)
+    trap '\''rm -rf "$install_root"'\'' EXIT
+    cp -R /opt/pnpm-store "$install_root/store"
+    cp -R /opt/pnpm-cache "$install_root/cache"
     pnpm --dir packages/forage install --ignore-workspace --offline \
-      --frozen-lockfile --ignore-scripts --store-dir /opt/pnpm-store \
+      --frozen-lockfile --ignore-scripts --store-dir "$install_root/store" \
+      --cache-dir "$install_root/cache" \
       --package-import-method=copy
     pnpm --dir packages/forage run build
     pnpm --dir packages/forage run smoke
@@ -66,6 +79,10 @@ Compare emitted output hashes with the recovered files and recheck every source
 hash. The local bind mount proves recoverable offline build outputs; it does not
 prove hosted Mycelium transfer or Computer Workspace persistence. The hosted run
 must use authorized file operations and recover from the same Home separately.
+
+The Hub image helper verifies the source revision, manifest digest and
+dependency recipe digest labels. A historical image ID or source-only match
+cannot qualify an image built with an older offline dependency recipe.
 
 ## Lock provenance and accepted run
 
