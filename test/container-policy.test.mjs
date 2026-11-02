@@ -48,12 +48,14 @@ test("Git uses the runtime merged CA bundle with verification enabled", async ()
   );
 });
 
-test("container acquisition configures the 15 minute inactivity timeout", async () => {
+test("the platform inactivity timeout is a 15 minute backstop, raised only for Keep awake", async () => {
   const timeouts = [];
-  await configureComputerContainer({
+  const container = {
     setInactivityTimeout: async (timeout) => timeouts.push(timeout),
-  });
-  assert.deepEqual(timeouts, [15 * 60 * 1_000]);
+  };
+  await configureComputerContainer(container, false);
+  await configureComputerContainer(container, true);
+  assert.deepEqual(timeouts, [15 * 60 * 1_000, 24 * 60 * 60 * 1_000]);
   assert.equal(computerContainerSleepAfterMs, 15 * 60 * 1_000);
 });
 

@@ -1,5 +1,21 @@
 /* global fetch */
 import assert from "node:assert/strict";
+import { computerToolResultSchema } from "@fungi.computer/computer-contract";
+
+/**
+ * A command whose durable operation has no retained output: the Computer could
+ * not establish a terminal result (for example its container failed to start),
+ * so there is no exit code to assert on.
+ */
+export class ProofOperationUnsettledError extends Error {
+  constructor(capability, operation) {
+    super(
+      `Computer ${capability} has no output: its operation is ${operation.status}`,
+    );
+    this.name = "ProofOperationUnsettledError";
+    this.operation = operation;
+  }
+}
 
 /** HTTP seam shared by native Computer proofs while the Worker is reconstructed. */
 export function proofClient(worker) {
@@ -15,9 +31,11 @@ export function proofClient(worker) {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ capability, input }),
     });
-    return capability === "bash" || capability === "exec"
-      ? result.output
-      : result;
+    if (capability !== "bash" && capability !== "exec") return result;
+    const operation = computerToolResultSchema.parse(result);
+    if (operation.output === null)
+      throw new ProofOperationUnsettledError(capability, operation);
+    return operation.output;
   }
   return { json, call };
 }

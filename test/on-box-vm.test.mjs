@@ -14,7 +14,6 @@ const host = new OnBoxVmContainerHost(
   { hostId: "hel1", origin: "https://box.example" },
   env,
   "a".repeat(64),
-  60_000,
 );
 
 test("an expired VM destroy request is a typed timeout, not an offline observation", async (t) => {
@@ -92,7 +91,6 @@ test(
         { hostId: "hel1", origin: `http://127.0.0.1:${address.port}` },
         env,
         "a".repeat(64),
-        60_000,
       );
       const controller = new globalThis.AbortController();
       t.mock.method(globalThis.AbortSignal, "timeout", () => controller.signal);
@@ -114,3 +112,15 @@ test(
     }
   },
 );
+
+test("a VM boots with vmd's sleep timer at its maximum, as a backstop to ComputerDO", async (t) => {
+  const bodies = [];
+  t.mock.method(globalThis, "fetch", async (_url, init) => {
+    bodies.push(JSON.parse(new globalThis.TextDecoder().decode(init.body)));
+    return globalThis.Response.json({ runtimeId: "runtime-one" });
+  });
+  assert.deepEqual(await host.start({}, false), { runtimeId: "runtime-one" });
+  assert.deepEqual(bodies, [
+    { env: {}, enableInternet: false, sleepAfterMs: 86_400_000 },
+  ]);
+});

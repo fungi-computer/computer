@@ -1,5 +1,23 @@
 # @fungi.computer/computer
 
+## 0.5.0
+
+### Minor Changes
+
+- Changes since 0.4.2:
+
+  - fix(computer): decode native call results with the tool result schema
+  - fix(computer): decode the operation envelope before proofs read an exit code
+  - fix(hub): keep a queued Computer start until it runs or visibly fails
+  - feat(computer): add the per-Computer Keep awake opt-in (HB-11)
+  - feat(computer): sleep idle Computers and meter only to the last activity
+    (HB-11)
+
+### Patch Changes
+
+- @fungi.computer/knapsack@0.4.4
+  - @fungi.computer/computer-contract@0.0.9
+
 ## 0.4.2
 
 ### Patch Changes

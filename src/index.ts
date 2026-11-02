@@ -112,7 +112,6 @@ import {
 } from "./process-inventory.js";
 import {
   assertComputerContainersEnabled,
-  computerContainerSleepAfterMs,
   ComputerContainersPausedError,
   configureComputerContainer,
   hostedComputerContainersPaused,
@@ -123,6 +122,7 @@ import {
   type OnBoxVmEnv,
   type OnBoxVmPlacement,
 } from "./on-box-vm.js";
+import { computerKeepAwake } from "./fleet/keep-awake.js";
 import {
   attachedBackendId,
   describeAttachedBackend,
@@ -401,7 +401,12 @@ class ContainerComputer extends ContainerComputerBase {
       hostedComputerContainersPaused(env.HOSTED_COMPUTERS)
     )
       return;
-    ctx.waitUntil(configureComputerContainer(ctx.container));
+    ctx.waitUntil(
+      configureComputerContainer(
+        ctx.container,
+        computerKeepAwake(ctx.storage.sql),
+      ),
+    );
   }
 
   public override getWorkspaceContainer() {
@@ -570,7 +575,6 @@ class ContainerComputer extends ContainerComputerBase {
       placement,
       this.bindings,
       this.state.id.toString(),
-      computerContainerSleepAfterMs,
     );
   }
 
@@ -730,6 +734,21 @@ export class ComputerDO extends ContainerComputer implements ComputerFilesRpc {
   /** Host-admitted settings write; egress reads the current durable value. */
   internetAccess(enabled?: boolean): boolean {
     return computerInternetAccess(this.state.storage.sql, enabled);
+  }
+
+  /**
+   * Host-admitted Keep awake write. The fleet's idle policy and metering read
+   * the durable value; a container's platform backstop follows it.
+   */
+  async keepAwake(enabled?: boolean): Promise<boolean> {
+    const kept = computerKeepAwake(this.state.storage.sql, enabled);
+    if (
+      enabled !== undefined &&
+      this.state.container !== undefined &&
+      !hostedComputerContainersPaused(this.bindings.HOSTED_COMPUTERS)
+    )
+      await configureComputerContainer(this.state.container, kept);
+    return kept;
   }
 
   #binaryFileTail: Promise<undefined> = Promise.resolve(undefined);

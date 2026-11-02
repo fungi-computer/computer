@@ -19,6 +19,7 @@ export {
   type LocalBackendDetachInput,
 } from "./wire.js";
 export { ComputerRuntimeUsage } from "./runtime-usage.js";
+export { computerKeepAwake } from "./keep-awake.js";
 export {
   computerUsageIntervalSchema,
   type ComputerUsageInterval,

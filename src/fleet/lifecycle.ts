@@ -15,6 +15,7 @@ import {
 import { z } from "zod";
 import { ComputerRuntimeUsage } from "./runtime-usage.js";
 import { checkComputerGrant } from "./admission.js";
+import { computerKeepAwake } from "./keep-awake.js";
 import type { ComputerGrant } from "./wire.js";
 
 /** Runtime observations consumed by the host; never host callbacks. */
@@ -224,14 +225,12 @@ export class FleetLifecycle {
       throw new FleetGrantRefused();
     this.#hostedOperations++;
     try {
-      if (backing.kind === "platform-container")
-        this.usage.touchActivity(backing, Date.now());
+      this.usage.touchActivity(backing, Date.now());
       return await run();
     } finally {
       this.#hostedOperations--;
       this.#lastHostedActivity = Date.now();
-      if (backing.kind === "platform-container")
-        this.usage.touchActivity(backing, this.#lastHostedActivity);
+      this.usage.touchActivity(backing, this.#lastHostedActivity);
       if (backing.kind === "on-box-vm") {
         if (!this.usage.hasOpen(backing))
           this.#facts.push({ kind: "reservation.release" });
@@ -254,8 +253,7 @@ export class FleetLifecycle {
       if (now - lastRecordedAt < 30_000) return;
       lastRecordedAt = now;
       this.#lastHostedActivity = now;
-      if (backing.kind === "platform-container")
-        this.usage.touchActivity(backing, now);
+      this.usage.touchActivity(backing, now);
     };
     if (socket !== null) {
       const pair = new WebSocketPair();
@@ -364,7 +362,7 @@ export class FleetLifecycle {
       if (!(current.running && current.runtimeId === row.runtimeId)) {
         this.usage.observe(row.runtimeId, {
           running: false,
-          endedAt: row.requestedAt,
+          at: this.billedThrough(row.runtimeId, row.requestedAt),
         });
         if (current.running && current.runtimeId !== null)
           this.containerRuntimeStarted({
@@ -439,41 +437,67 @@ export class FleetLifecycle {
     }
   }
 
+  /** Whether this Computer is metered without fresh activity: a dispatch is
+   * in flight, or its owner opted into Keep awake. */
+  private get awake(): boolean {
+    return (
+      this.#hostedOperations > 0 || computerKeepAwake(this.ports.storage.sql)
+    );
+  }
+
+  /** Metering never runs past the last activity of a Computer that is not awake. */
+  private billedThrough(runtimeId: string, at: number): number {
+    if (this.awake) return at;
+    return Math.min(at, this.usage.lastActivity(runtimeId, at) ?? at);
+  }
+
+  /** Whether an idle runtime has passed its sleep window. */
+  private sleepDue(runtimeId: string, now: number): boolean {
+    if (this.awake) return false;
+    const last = this.usage.lastActivity(runtimeId, now);
+    return last !== null && now >= last + computerContainerSleepAfterMs;
+  }
+
   private async observeRuntime(
     runtimeId: string,
     backing: HostedBacking,
     newest: boolean,
-  ): Promise<{ running: boolean; endedAt: number }> {
+  ): Promise<{ running: boolean; at: number }> {
     const now = Date.now();
-    if (backing.kind === "platform-container") {
-      const container = this.ports.backend.state.container;
-      if (newest && container?.running === true) {
-        const deadline = this.usage.idleDeadline(
-          runtimeId,
-          computerContainerSleepAfterMs,
-          now,
-        );
-        if (
-          deadline !== null &&
-          this.#hostedOperations === 0 &&
-          now >= deadline
-        ) {
-          try {
-            await container.destroy(new Error("Computer idle timeout"));
-          } catch (cause) {
-            this.diagnostic("computer_idle_stop_failed", "idle_stop", cause);
-            return { running: true, endedAt: now };
-          }
-          return { running: false, endedAt: deadline };
-        }
-        return { running: true, endedAt: now };
+    const { running, exitedAt } = await this.readRuntime(
+      runtimeId,
+      backing,
+      newest,
+      now,
+    );
+    if (running && this.sleepDue(runtimeId, now)) {
+      try {
+        await this.destroyRuntime(backing, "Computer idle timeout");
+      } catch (cause) {
+        this.diagnostic("computer_idle_stop_failed", "idle_stop", cause);
+        return { running: true, at: this.billedThrough(runtimeId, now) };
       }
-      return { running: false, endedAt: now };
+      return { running: false, at: this.billedThrough(runtimeId, now) };
     }
+    return { running, at: this.billedThrough(runtimeId, exitedAt) };
+  }
+
+  /** Whether the runtime still runs, and when it stopped if it does not. */
+  private async readRuntime(
+    runtimeId: string,
+    backing: HostedBacking,
+    newest: boolean,
+    now: number,
+  ): Promise<{ running: boolean; exitedAt: number }> {
+    if (backing.kind === "platform-container")
+      return {
+        running: newest && this.ports.backend.state.container?.running === true,
+        exitedAt: now,
+      };
     const state = await this.ports.backend.onBoxVmHost(backing.hostId).state();
     return {
       running: state.running && state.runtimeId === runtimeId,
-      endedAt: state.exit?.exitedAt ?? now,
+      exitedAt: Math.min(now, state.exit?.exitedAt ?? now),
     };
   }
 
@@ -565,14 +589,15 @@ export class FleetLifecycle {
       await this.ports.backend.state.container.destroy(new Error(reason));
     return this.observeOpenRuntimes();
   }
-  private async destroyRuntime(backing: HostedBacking): Promise<void> {
+  private async destroyRuntime(
+    backing: HostedBacking,
+    reason = "Computer usage delivery unavailable",
+  ): Promise<void> {
     if (backing.kind === "on-box-vm") {
       await this.ports.backend.onBoxVmHost(backing.hostId).destroy();
       return;
     }
     if (this.ports.backend.state.container !== undefined)
-      await this.ports.backend.state.container.destroy(
-        new Error("Computer usage delivery unavailable"),
-      );
+      await this.ports.backend.state.container.destroy(new Error(reason));
   }
 }

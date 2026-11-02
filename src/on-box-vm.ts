@@ -179,6 +179,12 @@ const vmStartSchema = z.lazy(() =>
 export type OnBoxVmOperation =
   "status" | "start" | "restart" | "destroy" | "intercept" | "inventory";
 
+/**
+ * vmd's own traffic timer is only a backstop at its maximum: ComputerDO owns
+ * idle sleep, so a kept-awake VM is not stopped by the host while it is quiet.
+ */
+const vmHostSleepBackstopMs = 24 * 60 * 60 * 1_000;
+
 /** A bounded control-plane wait, not the VM's execution or allocation lifetime. */
 const vmControlTimeoutMs = 60_000;
 
@@ -240,21 +246,13 @@ export class OnBoxVmContainerHost implements IWorkspaceContainerAPI {
   readonly #placement: OnBoxVmPlacement;
   readonly #env: OnBoxVmEnv;
   readonly #vmId: string;
-  readonly #sleepAfterMs: number;
-
-  constructor(
-    placement: OnBoxVmPlacement,
-    env: OnBoxVmEnv,
-    vmId: string,
-    sleepAfterMs: number,
-  ) {
+  constructor(placement: OnBoxVmPlacement, env: OnBoxVmEnv, vmId: string) {
     this.#placement = placement;
     this.#env = env;
     this.#vmId = z
       .string()
       .regex(/^[0-9a-f]{64}$/)
       .parse(vmId);
-    this.#sleepAfterMs = sleepAfterMs;
   }
 
   async #call<T>(
@@ -295,7 +293,7 @@ export class OnBoxVmContainerHost implements IWorkspaceContainerAPI {
     const started = await this.#call(operation, vmStartSchema, {
       env,
       enableInternet,
-      sleepAfterMs: this.#sleepAfterMs,
+      sleepAfterMs: vmHostSleepBackstopMs,
     });
     return { runtimeId: started.runtimeId };
   }

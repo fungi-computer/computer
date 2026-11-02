@@ -1,3 +1,4 @@
+/* global Response, TransformStream */
 import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
 import { test } from "node:test";
@@ -38,7 +39,7 @@ test("usage facts keep their Computer and provenance through delivery acknowledg
       backing: { kind: "platform-container" },
       startedAt: 1_000,
     });
-    usage.observe("runtime-one", { running: false, endedAt: 2_000 });
+    usage.observe("runtime-one", { running: false, at: 2_000 });
     const facts = usage.pendingFacts("computer-one", { actor: "computer-one" });
     assert.deepEqual(facts, [
       {
@@ -622,3 +623,233 @@ test("fleet creation commits inventory and backing together and returns projecti
     database.close();
   }
 });
+
+const minute = 60_000;
+const sleepWindow = 15 * minute;
+const hostGrant = (computerId) => ({
+  computerId,
+  actions: new Set(["start"]),
+  expiresAt: Number.MAX_SAFE_INTEGER,
+  provenance: { actor: "owner" },
+});
+
+/** One Computer on a fake clock; `vm` selects the on-box VM backing. */
+function idleFleet(t, FleetLifecycle, { vm }) {
+  const clock = { now: 1_000_000 };
+  t.mock.method(Date, "now", () => clock.now);
+  const database = new DatabaseSync(":memory:");
+  const backing = vm
+    ? { kind: "on-box-vm", hostId: "host-one" }
+    : { kind: "platform-container" };
+  const runtime = { running: true, runtimeId: "runtime-one", exit: null };
+  const destroyed = [];
+  const stop = (reason) => {
+    destroyed.push(reason);
+    runtime.running = false;
+    runtime.exit = { reason, exitedAt: clock.now };
+  };
+  const fleet = new FleetLifecycle({
+    storage: {
+      ...fromNodeSqlite(database),
+      getAlarm: async () => null,
+      setAlarm: async () => undefined,
+    },
+    alarm: { waitUntil: () => undefined },
+    computerId: "sleeper",
+    backend: {
+      state: {
+        id: { toString: () => "sleeper" },
+        container: {
+          get running() {
+            return runtime.running;
+          },
+          destroy: async (error) => stop(error.message),
+        },
+      },
+      onBoxVmHost: () => ({
+        state: async () => ({ ...runtime }),
+        destroy: async () => {
+          stop("destroyed");
+          return { ok: true };
+        },
+      }),
+    },
+  });
+  fleet.containerRuntimeStarted({
+    runtimeId: "runtime-one",
+    backing,
+    startedAt: clock.now,
+  });
+  const interval = () =>
+    fleet.usage.pending().find((row) => row.runtimeId === "runtime-one");
+  return { clock, database, backing, runtime, destroyed, fleet, interval };
+}
+
+for (const vm of [false, true]) {
+  const name = vm ? "an on-box VM" : "a platform container";
+  test(`${name} sleeps after the idle window and is metered only to its last activity`, async (t) => {
+    const { FleetLifecycle } = await import("../dist/fleet/index.js");
+    const { clock, database, backing, destroyed, fleet, interval } = idleFleet(
+      t,
+      FleetLifecycle,
+      { vm },
+    );
+    try {
+      const startedAt = clock.now;
+      clock.now += 2 * minute;
+      await fleet.run(hostGrant("sleeper"), backing, async () => "ls");
+      const lastActivity = clock.now;
+      // Idle checkpoints never run ahead of the last activity.
+      for (let step = 0; step < 14; step++) {
+        clock.now += minute;
+        await fleet.observe();
+        assert.equal(interval().observedAt, lastActivity);
+        assert.equal(interval().ended, false);
+      }
+      assert.deepEqual(destroyed, []);
+      clock.now = lastActivity + sleepWindow;
+      await fleet.observe();
+      assert.equal(destroyed.length, 1);
+      assert.deepEqual(interval(), {
+        runtimeId: "runtime-one",
+        backing,
+        startedAt,
+        observedAt: lastActivity,
+        ended: true,
+      });
+    } finally {
+      database.close();
+    }
+  });
+
+  test(`${name} stays awake and metered while a dispatch is in flight`, async (t) => {
+    const { FleetLifecycle } = await import("../dist/fleet/index.js");
+    const { clock, database, backing, destroyed, fleet, interval } = idleFleet(
+      t,
+      FleetLifecycle,
+      { vm },
+    );
+    const entered = Promise.withResolvers();
+    const finish = Promise.withResolvers();
+    let operation;
+    try {
+      operation = fleet.run(hostGrant("sleeper"), backing, async () => {
+        entered.resolve();
+        await finish.promise;
+      });
+      await entered.promise;
+      clock.now += 2 * sleepWindow;
+      await fleet.observe();
+      assert.deepEqual(destroyed, []);
+      assert.equal(interval().observedAt, clock.now);
+      finish.resolve();
+      await operation;
+      const finishedAt = clock.now;
+      clock.now = finishedAt + sleepWindow;
+      await fleet.observe();
+      assert.equal(destroyed.length, 1);
+      assert.equal(interval().observedAt, finishedAt);
+      assert.equal(interval().ended, true);
+    } finally {
+      finish.resolve();
+      await operation;
+      database.close();
+    }
+  });
+
+  test(`${name} stopped by its host is still metered only to its last activity`, async (t) => {
+    const { FleetLifecycle } = await import("../dist/fleet/index.js");
+    const { clock, database, backing, runtime, fleet, interval } = idleFleet(
+      t,
+      FleetLifecycle,
+      { vm },
+    );
+    try {
+      clock.now += minute;
+      await fleet.run(hostGrant("sleeper"), backing, async () => "ls");
+      const lastActivity = clock.now;
+      // The platform or vmd backstop stops it at its own deadline.
+      clock.now += sleepWindow;
+      runtime.running = false;
+      runtime.exit = { reason: "sleep", exitedAt: clock.now };
+      clock.now += minute;
+      await fleet.observe();
+      assert.equal(interval().observedAt, lastActivity);
+      assert.equal(interval().ended, true);
+    } finally {
+      database.close();
+    }
+  });
+}
+
+test("terminal and preview traffic count as on-box VM activity", async (t) => {
+  const { FleetLifecycle } = await import("../dist/fleet/index.js");
+  const { clock, database, backing, destroyed, fleet, interval } = idleFleet(
+    t,
+    FleetLifecycle,
+    { vm: true },
+  );
+  try {
+    const source = new TransformStream();
+    const response = fleet.trackResponse(
+      backing,
+      new Response(source.readable),
+    );
+    const reader = response.body.getReader();
+    const writer = source.writable.getWriter();
+    for (let step = 0; step < 20; step++) {
+      clock.now += minute;
+      await Promise.all([writer.write(new Uint8Array([1])), reader.read()]);
+      await fleet.observe();
+      assert.deepEqual(destroyed, []);
+    }
+    const lastActivity = clock.now;
+    assert.equal(interval().observedAt, lastActivity);
+    await Promise.all([writer.close(), reader.read()]);
+    clock.now = lastActivity + sleepWindow;
+    await fleet.observe();
+    assert.equal(destroyed.length, 1);
+    assert.equal(interval().observedAt, lastActivity);
+  } finally {
+    database.close();
+  }
+});
+
+for (const vm of [false, true]) {
+  const name = vm ? "an on-box VM" : "a platform container";
+  test(`Keep awake holds ${name} up and metered until it is turned off`, async (t) => {
+    const { FleetLifecycle, computerKeepAwake } =
+      await import("../dist/fleet/index.js");
+    const { clock, database, backing, destroyed, fleet, interval } = idleFleet(
+      t,
+      FleetLifecycle,
+      { vm },
+    );
+    const sql = () => fromNodeSqlite(database).sql;
+    try {
+      assert.equal(computerKeepAwake(sql()), false);
+      clock.now += minute;
+      await fleet.run(hostGrant("sleeper"), backing, async () => "ls");
+      const lastActivity = clock.now;
+      assert.equal(computerKeepAwake(sql(), true), true);
+      for (let step = 0; step < 30; step++) {
+        clock.now += 2 * minute;
+        await fleet.observe();
+        assert.deepEqual(destroyed, []);
+        assert.equal(interval().observedAt, clock.now);
+      }
+      const keptUntil = clock.now;
+      // Off again, a Computer idle past its window sleeps at the next watch,
+      // and the kept-awake time it was charged is not taken back.
+      assert.equal(computerKeepAwake(sql(), false), false);
+      assert.ok(keptUntil > lastActivity + sleepWindow);
+      clock.now += minute;
+      await fleet.observe();
+      assert.equal(destroyed.length, 1);
+      assert.equal(interval().observedAt, keptUntil);
+      assert.equal(interval().ended, true);
+    } finally {
+      database.close();
+    }
+  });
+}

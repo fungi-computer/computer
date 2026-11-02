@@ -59,6 +59,8 @@
     "package/dist/fleet/inventory-wire.js",
     "package/dist/fleet/inventory.d.ts",
     "package/dist/fleet/inventory.js",
+    "package/dist/fleet/keep-awake.d.ts",
+    "package/dist/fleet/keep-awake.js",
     "package/dist/fleet/lifecycle.d.ts",
     "package/dist/fleet/lifecycle.js",
     "package/dist/fleet/runtime-usage.d.ts",

@@ -14,9 +14,9 @@ import type {
 /**
  * Computer-local interval ledger; the host owns usage settlement.
  *
- * A running runtime's checkpoint advances at most once per `checkpointMs`.
- * Repeated reads inside one checkpoint expose the same interval so the host
- * can deliver it idempotently.
+ * A running runtime's checkpoint advances at most once per `checkpointMs`, and
+ * only as far as its owner says it is billed through. Repeated reads inside one
+ * checkpoint expose the same interval so the host can deliver it idempotently.
  */
 export class ComputerRuntimeUsage {
   constructor(
@@ -64,7 +64,8 @@ export class ComputerRuntimeUsage {
     );
   }
 
-  idleDeadline(runtimeId: string, idleMs: number, now: number): number | null {
+  /** The last recorded activity of an open runtime; a missing record starts now. */
+  lastActivity(runtimeId: string, now: number): number | null {
     this.ensure();
     this.sql.exec(
       "INSERT OR IGNORE INTO hub_computer_runtime_activity (runtime_id, last_activity_at) SELECT runtime_id, ? FROM hub_computer_runtime_usage WHERE runtime_id=? AND ended=0",
@@ -79,7 +80,7 @@ export class ComputerRuntimeUsage {
       .toArray()[0];
     return row === undefined
       ? null
-      : z.number().int().nonnegative().parse(row.last_activity_at) + idleMs;
+      : z.number().int().nonnegative().parse(row.last_activity_at);
   }
 
   hasOpen(backing: HostedBacking): boolean {
@@ -201,24 +202,25 @@ export class ComputerRuntimeUsage {
       );
   }
 
-  observe(
-    runtimeId: string,
-    observed: { running: boolean; endedAt: number },
-  ): void {
+  /**
+   * Record a runtime observation. `at` is the end of an ended runtime, or the
+   * billed-through time of a running one; checkpoints never move backward.
+   */
+  observe(runtimeId: string, observed: { running: boolean; at: number }): void {
     if (!observed.running) {
       this.sql.exec(
         "UPDATE hub_computer_runtime_usage SET observed_at = MAX(observed_at, ?), ended = 1 WHERE runtime_id = ?",
-        observed.endedAt,
+        observed.at,
         runtimeId,
       );
       return;
     }
-    const now = Date.now();
     this.sql.exec(
-      "UPDATE hub_computer_runtime_usage SET observed_at = ? WHERE runtime_id = ? AND ended = 0 AND observed_at <= ?",
-      now,
+      "UPDATE hub_computer_runtime_usage SET observed_at = ? WHERE runtime_id = ? AND ended = 0 AND observed_at < ? AND observed_at <= ?",
+      observed.at,
       runtimeId,
-      now - this.checkpointMs,
+      observed.at,
+      Date.now() - this.checkpointMs,
     );
   }
 

@@ -48,7 +48,10 @@ export type ComputerGrant = z.output<typeof computerGrantSchema>;
 
 /** State visible without knowing which application hosts the Computer. */
 export const computerStateSchema = z.discriminatedUnion("state", [
-  z.strictObject({ state: z.enum(["running", "sleeping", "starting"]) }),
+  // start_failed: a queued start ended without running; start again.
+  z.strictObject({
+    state: z.enum(["running", "sleeping", "starting", "start_failed"]),
+  }),
   z.strictObject({
     state: z.literal("queued"),
     position: z.number().int().positive(),

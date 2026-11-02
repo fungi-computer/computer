@@ -4,30 +4,17 @@ import { randomBytes } from "node:crypto";
 import process from "node:process";
 import { z } from "zod";
 import { proofWorkers } from "./proof-worker.mjs";
+import { proofClient } from "./proof-client.mjs";
 
 const terminalMessage = z.union([z.string(), z.instanceof(ArrayBuffer)]);
 const workers = await proofWorkers("terminal-proof");
 const worker = await workers.start();
 const { baseUrl, output } = worker;
+const { call } = proofClient(() => worker);
 
 async function stop() {
   await workers.stop(worker);
   await workers.dispose();
-}
-
-async function call(capability, input) {
-  const response = await fetch(`${baseUrl}/call`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ capability, input }),
-  });
-  if (!response.ok) {
-    throw new Error(`Computer ${capability} failed: ${await response.text()}`);
-  }
-  const result = await response.json();
-  return capability === "bash" || capability === "exec"
-    ? result.output
-    : result;
 }
 
 function hex() {
