@@ -140,6 +140,7 @@ import {
   LocalBackendConnections,
   LocalWorkspaceBackend,
   localBackendDialPath,
+  ownerLocalBackendDialPath,
   verifyLocalBackendDial,
 } from "./local-backend.js";
 
@@ -713,6 +714,13 @@ class ContainerComputer extends ContainerComputerBase {
     const dial = localBackendDialPath.exec(url.pathname);
     if (dial !== null)
       return this.#acceptLocalDial(request, dial[2] ?? "", dial[3] ?? "");
+    const ownerDial = ownerLocalBackendDialPath.exec(url.pathname);
+    if (ownerDial !== null)
+      return this.#acceptLocalDial(
+        request,
+        ownerDial[1] ?? "",
+        ownerDial[2] ?? "",
+      );
     const vm = vmUpgradePath.exec(url.pathname);
     const id = vm === null ? "container" : `vm-${vm[1] ?? ""}`;
     if (vm !== null) url.pathname = vm[2] ?? "/ws";
@@ -2060,6 +2068,7 @@ export {
   LocalBackendOfflineError,
   localBackendAudience,
   localBackendDialPath,
+  ownerLocalBackendDialPath,
   verifyLocalBackendDial,
 } from "./local-backend.js";
 /** Keep each native Workspace lease inside the operation that uses it. */

@@ -179,3 +179,11 @@ export async function verifyLocalBackendDial(
  */
 export const localBackendDialPath =
   /^\/api\/teams\/([^/]+)\/computers\/([^/]+)\/backends\/(local-[a-z2-7]{16})\/connect$/;
+
+/**
+ * A standalone Oyster has one owner and no Teams. Its machines dial the owner's
+ * Computer directly: `/api/computers/:computer/backends/:id/connect`, signed
+ * for the same audience.
+ */
+export const ownerLocalBackendDialPath =
+  /^\/api\/computers\/([^/]+)\/backends\/(local-[a-z2-7]{16})\/connect$/;

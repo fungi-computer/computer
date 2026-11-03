@@ -130,6 +130,20 @@ export type LocalBackendDetachInput =
   | z.output<typeof localBackendDetachSchema>
   | z.output<typeof localBackendDetachRequestSchema>;
 
+/** One attached backend as its owner sees it on the Computer page. */
+export const computerBackendViewSchema = z.strictObject({
+  id: z.string(),
+  kind: z.enum(["platform-container", "on-box-vm", "local"]),
+  status: z.enum(["ready", "queued", "online", "offline"]),
+  queuePosition: z.number().int().positive().nullable(),
+  hostId: z.string().nullable(),
+  hostLabel: z.string().nullable(),
+  folderLabel: z.string().nullable(),
+  /** Only the actor who attached a machine may detach it. */
+  detachable: z.boolean(),
+});
+export type ComputerBackendView = z.output<typeof computerBackendViewSchema>;
+
 const factIdentity = {
   computerId: computerGrantSchema.shape.computerId,
   provenance: computerProvenanceSchema,

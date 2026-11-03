@@ -1,5 +1,19 @@
 # @fungi.computer/computer
 
+## 0.6.0
+
+### Minor Changes
+
+- Changes since 0.5.0:
+
+  - feat(oyster): attach a local folder to a standalone Oyster Computer
+
+### Patch Changes
+
+- @fungi.computer/knapsack@0.4.5
+  - @fungi.computer/seam@0.2.1
+  - @fungi.computer/computer-contract@0.0.10
+
 ## 0.5.0
 
 ### Minor Changes
