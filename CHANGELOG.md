@@ -1,5 +1,18 @@
 # @fungi.computer/computer
 
+## 0.6.1
+
+### Patch Changes
+
+- Changes since 0.6.0:
+
+  - fix(computer): make the unit tier hermetic and declare its Local native
+    digests
+  - fix(computer): partition on-box VM ingress replay history per VM
+
+- Updated dependencies
+  - @fungi.computer/seam@0.2.2
+
 ## 0.6.0
 
 ### Minor Changes

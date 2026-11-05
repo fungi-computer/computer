@@ -5,7 +5,7 @@ import type {
 import { z } from "zod";
 import * as Data from "effect/Data";
 import {
-  SeamReplayGuard,
+  SeamReplayPartitions,
   importSeamSigner,
   importSeamVerifiers,
   seamBodyDigest,
@@ -13,6 +13,7 @@ import {
   signSeamRequest,
   unsignedPayload,
   verifySeamRequest,
+  type SeamReplayStore,
   type SeamSigner,
   type SeamVerifiers,
 } from "@fungi.computer/seam";
@@ -396,7 +397,27 @@ export class OnBoxVmContainerHost implements IWorkspaceContainerAPI {
 
 const ingressPath = /^\/__computer-vm\/([0-9a-f]{64})(\/.*)$/;
 const egressUrlSchema = z.url({ protocol: /^https?$/ });
-const ingressReplay = new SeamReplayGuard();
+/** Slots one host's vmd can place (`maxSlots` in the celld VM instances). */
+const vmSlotsPerHost = 16_000;
+
+const ingressReplays = new Map<string, SeamReplayPartitions>();
+/**
+ * Ingress replay history, one bounded partition per VM id. The id is part of
+ * the signed path, so one guest's request rate fills only its own VM's
+ * history and never refuses another VM on the same or another host. The
+ * partition ceiling is every VM the registered hosts can place.
+ */
+function ingressReplay(env: OnBoxVmEnv, vmId: string): SeamReplayStore {
+  const raw = env.COMPUTER_VM_HOSTS ?? "{}";
+  let replays = ingressReplays.get(raw);
+  if (replays === undefined) {
+    replays = new SeamReplayPartitions(
+      Math.max(1, Object.keys(hostRegistry(env)).length) * vmSlotsPerHost,
+    );
+    ingressReplays.set(raw, replays);
+  }
+  return replays.partition(vmId);
+}
 
 /** The Computer namespace the ingress door addresses by object id. */
 export type ComputerObjects = Readonly<{
@@ -429,6 +450,7 @@ export function onBoxVmIngress(
 async function ingressHost(
   request: Request,
   env: OnBoxVmEnv,
+  vmId: string,
 ): Promise<string | undefined> {
   try {
     return await verifySeamRequest(
@@ -438,7 +460,7 @@ async function ingressHost(
       request.url,
       request.headers.get(seamHeader),
       null,
-      ingressReplay,
+      ingressReplay(env, vmId),
     );
   } catch (cause) {
     console.error("VM seam verification refused", cause);
@@ -497,7 +519,7 @@ async function verifiedVmIngress(
   rest: string,
   search: string,
 ): Promise<Response> {
-  const hostId = await ingressHost(request, env);
+  const hostId = await ingressHost(request, env, id);
   if (hostId === undefined) return new Response(null, { status: 404 });
   const headers = new Headers(request.headers);
   headers.delete(seamHeader);

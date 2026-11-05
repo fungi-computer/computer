@@ -1,10 +1,16 @@
 import assert from "node:assert/strict";
+import { Buffer } from "node:buffer";
 import { generateKeyPairSync } from "node:crypto";
 import { once } from "node:events";
 import { createServer } from "node:http";
 import test from "node:test";
-import { seamHeader } from "@fungi.computer/seam";
-import { OnBoxVmContainerHost } from "../dist/on-box-vm.js";
+import {
+  importSeamSigner,
+  seamHeader,
+  signSeamRequest,
+  unsignedPayload,
+} from "@fungi.computer/seam";
+import { OnBoxVmContainerHost, onBoxVmIngress } from "../dist/on-box-vm.js";
 
 const { privateKey } = generateKeyPairSync("ed25519");
 const env = {
@@ -124,3 +130,78 @@ test("a VM boots with vmd's sleep timer at its maximum, as a backstop to Compute
     { env: {}, enableInternet: false, sleepAfterMs: 86_400_000 },
   ]);
 });
+
+function hostPair(hostId) {
+  const pair = generateKeyPairSync("ed25519");
+  return {
+    secret: `${hostId}:${pair.privateKey.export({ format: "der", type: "pkcs8" }).toString("base64")}`,
+    publicKey: Buffer.from(
+      pair.publicKey.export({ format: "jwk" }).x,
+      "base64url",
+    ).toString("base64"),
+  };
+}
+
+test(
+  "one VM's guest filling its replay history never refuses another VM's ingress",
+  { timeout: 60_000 },
+  async (t) => {
+    t.mock.method(globalThis.console, "error", () => undefined);
+    const hel1 = hostPair("hel1");
+    const hel2 = hostPair("hel2");
+    const ingressEnv = {
+      COMPUTER_VM_HOSTS: JSON.stringify({
+        hel1: { origin: "https://hel1.example", publicKey: hel1.publicKey },
+        hel2: { origin: "https://hel2.example", publicKey: hel2.publicKey },
+      }),
+    };
+    const signers = {
+      hel1: await importSeamSigner(hel1.secret),
+      hel2: await importSeamSigner(hel2.secret),
+    };
+    const reached = [];
+    const computers = {
+      idFromString: (id) => id,
+      get: (id) => ({
+        fetch: async (request) => {
+          reached.push(`${id}:${new globalThis.URL(request.url).pathname}`);
+          return new globalThis.Response("connected");
+        },
+      }),
+    };
+    const ingress = async (hostId, vmId, path) => {
+      const url = `https://hub.example/__computer-vm/${vmId}${path}`;
+      const headers = new globalThis.Headers({
+        [seamHeader]: await signSeamRequest(
+          signers[hostId],
+          "computer-vm-ingress",
+          "GET",
+          url,
+          unsignedPayload,
+        ),
+      });
+      const response = await onBoxVmIngress(
+        new globalThis.Request(url, { headers }),
+        ingressEnv,
+        computers,
+      );
+      return response.status;
+    };
+    const attacker = "a".repeat(64);
+    const victim = "c".repeat(64);
+    // The guest's own health loop exhausts the 10,000-nonce window of its VM.
+    for (let index = 0; index < 10_000; index += 1)
+      assert.equal(await ingress("hel1", attacker, "/health"), 200);
+    assert.equal(
+      await ingress("hel1", attacker, "/health"),
+      404,
+      "the flooding VM is refused inside its own partition",
+    );
+    assert.equal(await ingress("hel1", victim, "/ws"), 200);
+    assert.equal(await ingress("hel2", victim, "/ws"), 200);
+    assert.deepEqual(reached, [
+      `${victim}:/__vm/hel1/ws`,
+      `${victim}:/__vm/hel2/ws`,
+    ]);
+  },
+);
