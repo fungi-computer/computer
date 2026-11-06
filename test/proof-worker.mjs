@@ -10,6 +10,7 @@
 // COMPUTER_VM_SIGNING_KEY and COMPUTER_VM_DEFAULT_HOST.
 // See tooling/celld-platform/computer-vm/.
 import { spawn } from "node:child_process";
+import console from "node:console";
 import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -129,7 +130,7 @@ function spawnRuntime(persistence, port, wranglerConfig) {
       cwd: packageRoot,
       detached: true,
       env: { ...process.env, CI: "1" },
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["ignore", "pipe", "pipe", "ipc"],
     },
   );
 }
@@ -155,7 +156,61 @@ async function probeProofWorker(baseUrl) {
   }
 }
 
-async function waitForProofWorker(server, baseUrl, selectedRuntime) {
+const devServerReady = z.object({
+  event: z.literal("DEV_SERVER_READY"),
+  ip: z.string(),
+  port: z.number().int().min(1).max(65_535),
+});
+
+// Wrangler's CLI forwards this native IPC event once its proxy is listening.
+// Cold CLI initialization belongs to the outer proof lifetime. Start the
+// Worker response budget only once its proxy is listening.
+async function waitForWranglerProxy(server, baseUrl) {
+  if (server.exitCode !== null || server.signalCode != null) return false;
+  const expected = new URL(baseUrl);
+  return await new Promise((resolve) => {
+    const finish = (ready) => {
+      server.off("message", message);
+      server.off("exit", ended);
+      server.off("error", ended);
+      server.off("disconnect", ended);
+      resolve(ready);
+    };
+    const ended = () => finish(false);
+    const message = (raw) => {
+      const encoded = z.string().safeParse(raw);
+      if (!encoded.success) return;
+      let decoded;
+      try {
+        decoded = JSON.parse(encoded.data);
+      } catch (cause) {
+        console.error(
+          "Wrangler readiness notification was not valid JSON",
+          cause,
+        );
+        finish(false);
+        return;
+      }
+      const parsed = devServerReady.safeParse(decoded);
+      if (parsed.success)
+        finish(
+          parsed.data.ip === expected.hostname &&
+            String(parsed.data.port) === expected.port,
+        );
+    };
+    server.on("message", message);
+    server.once("exit", ended);
+    server.once("error", ended);
+    server.once("disconnect", ended);
+  });
+}
+
+export async function waitForProofWorker(server, baseUrl, selectedRuntime) {
+  if (
+    selectedRuntime === "wrangler" &&
+    !(await waitForWranglerProxy(server, baseUrl))
+  )
+    return false;
   const deadline = proofDeadline(selectedRuntime);
   while (Date.now() < deadline) {
     if (server.exitCode !== null) return false;

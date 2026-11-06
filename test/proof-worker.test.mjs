@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { test } from "node:test";
 import process from "node:process";
-import { stopProofWorker } from "./proof-worker.mjs";
+import { stopProofWorker, waitForProofWorker } from "./proof-worker.mjs";
 
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 
@@ -62,4 +62,82 @@ test("a Worker that never closes fails within the bounded shutdown budget", asyn
   t.mock.timers.tick(12_001);
   await refused;
   assert.deepEqual(signals, ["SIGTERM", "SIGKILL"]);
+});
+
+test("cold Wrangler bootstrap cannot consume the Worker response budget", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const server = new EventEmitter();
+  server.exitCode = null;
+  server.signalCode = null;
+  let listening = false;
+  t.mock.method(globalThis, "fetch", async () => {
+    if (!listening) throw new Error("connection refused");
+    return new globalThis.Response(null, { status: 404 });
+  });
+  let settled = false;
+  const ready = waitForProofWorker(
+    server,
+    "http://127.0.0.1:1234",
+    "wrangler",
+  ).then((value) => {
+    settled = true;
+    return value;
+  });
+  await flush();
+  t.mock.timers.tick(31_000);
+  await flush();
+  assert.equal(
+    settled,
+    false,
+    "cold CLI preparation is not a failed Worker response",
+  );
+  listening = true;
+  server.emit(
+    "message",
+    JSON.stringify({ event: "DEV_SERVER_READY", ip: "127.0.0.1", port: 1234 }),
+  );
+  assert.equal(await ready, true);
+});
+
+test("Wrangler's ready notification alone does not prove the Worker serves requests", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const server = new EventEmitter();
+  server.exitCode = null;
+  server.signalCode = null;
+  t.mock.method(globalThis, "fetch", async () => {
+    throw new Error("connection refused");
+  });
+  let settled = false;
+  const ready = waitForProofWorker(
+    server,
+    "http://127.0.0.1:1234",
+    "wrangler",
+  ).then((value) => {
+    settled = true;
+    return value;
+  });
+  server.emit(
+    "message",
+    JSON.stringify({ event: "DEV_SERVER_READY", ip: "127.0.0.1", port: 1234 }),
+  );
+  await flush();
+  assert.equal(settled, false);
+  t.mock.timers.tick(31_000);
+  await flush();
+  assert.equal(
+    await ready,
+    false,
+    "the existing response budget still bounds a broken Worker",
+  );
+});
+
+test("Wrangler exiting before readiness refuses startup immediately", async () => {
+  const server = new EventEmitter();
+  server.exitCode = null;
+  server.signalCode = null;
+  const ready = waitForProofWorker(server, "http://127.0.0.1:1234", "wrangler");
+  server.exitCode = 1;
+  server.emit("exit", 1, null);
+  assert.equal(await ready, false);
+  assert.equal(server.listenerCount("message"), 0);
 });
