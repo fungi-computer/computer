@@ -75,13 +75,19 @@ from the repository root:
 pnpm turbo:run run build --filter=@fungi.computer/computer
 pnpm --filter @fungi.computer/computer typecheck
 pnpm --filter @fungi.computer/computer lint
-pnpm --filter @fungi.computer/computer test
+pnpm turbo:run run test --filter=@fungi.computer/computer
 ```
 
-The build emits the runtime and copies its daemon/build assets. The test suite
-uses disposable Workers and proof containers, so container proofs require a
-working local Docker/Workers environment. These commands do not deploy a Hub,
-publish an App or replace a production Computer image.
+The build emits the runtime and copies its daemon/build assets. The test graph
+assembles and builds the local container image before starting native Worker
+checks. Docker owns its layer cache; the image build has a separate bounded
+proof lifetime, so cold compilation does not consume the Worker response
+deadline. Before invoking a native test file directly, run
+`pnpm turbo:run run build:container --filter=@fungi.computer/computer`.
+
+The test suite uses disposable Workers and proof containers, so container proofs
+require a working local Docker/Workers environment. These commands do not deploy
+a Hub, publish an App or replace a production Computer image.
 
 ## Files and operation results
 

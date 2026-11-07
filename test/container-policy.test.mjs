@@ -92,7 +92,6 @@ async function assertConfiguredComputerBounds(configPath) {
 test("every configured platform Computer has the same CPU, memory and disk ceiling", async () => {
   const configPaths = [
     "apps/hub/wrangler.jsonc",
-    "apps/demo/wrangler.jsonc",
     "packages/computer/wrangler.test.jsonc",
     "packages/computer/wrangler.egress-test.jsonc",
   ];

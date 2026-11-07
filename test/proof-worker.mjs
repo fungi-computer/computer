@@ -298,10 +298,19 @@ export async function proofWorkers(
     const baseUrl = `http://127.0.0.1:${String(port)}`;
     if (await waitForProofWorker(server, baseUrl, runtime))
       return { baseUrl, output, server };
-    await stop({ server });
-    throw new Error(
+    const failure = new Error(
       `Computer ${label} Worker did not start under ${runtime}:\n${output.join("").slice(-4_000)}`,
     );
+    try {
+      await stop({ server });
+    } catch (cleanupFailure) {
+      throw new AggregateError(
+        [failure, cleanupFailure],
+        "Computer proof Worker startup and cleanup failed",
+        { cause: cleanupFailure },
+      );
+    }
+    throw failure;
   }
 
   async function stop(worker) {

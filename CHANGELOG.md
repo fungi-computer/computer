@@ -1,5 +1,20 @@
 # @fungi.computer/computer
 
+## 0.6.2
+
+### Patch Changes
+
+- Changes since 0.6.1:
+
+  - fix(computer): prepare container images before native proof startup
+  - fix(computer): wait for idle shutdown before dispatching commands
+
+- Updated dependencies
+  - @fungi.computer/watchdog@0.1.1
+  - @fungi.computer/seam@0.2.3
+  - @fungi.computer/knapsack@0.4.6
+  - @fungi.computer/computer-contract@0.0.11
+
 ## 0.6.1
 
 ### Patch Changes

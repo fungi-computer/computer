@@ -97,6 +97,7 @@ export class FleetLifecycle {
   #startingHosted = 0;
   #lastHostedActivity = Date.now();
   #recycling: Promise<ComputerVmRecycleError | undefined> | undefined;
+  #observing: Promise<HostedBacking[]> | undefined;
   #recycleRuntimeId: string | undefined;
   #facts: FleetLifecycleFact[] = [];
 
@@ -214,7 +215,7 @@ export class FleetLifecycle {
     backing: HostedBacking,
     run: () => Promise<T>,
   ): Promise<T> {
-    await this.awaitRecycle();
+    await this.awaitRuntimeMaintenance();
     if (
       checkComputerGrant(grant, {
         computerId: this.ports.computerId ?? "",
@@ -501,14 +502,29 @@ export class FleetLifecycle {
     };
   }
 
-  async awaitRecycle(): Promise<void> {
-    const error = await this.#recycling;
-    if (error !== undefined) throw error;
+  /** Native execution and host slot decisions wait until an idle stop is accounted for. */
+  async awaitRuntimeMaintenance(): Promise<void> {
+    while (this.#recycling !== undefined || this.#observing !== undefined) {
+      const error = await this.#recycling;
+      if (error !== undefined) throw error;
+      await this.#observing;
+    }
   }
 
   /** Reconcile durable observations before the host delivers usage facts. */
   async observe(): Promise<HostedBacking[]> {
     await this.#recycling;
+    if (this.#observing !== undefined) return this.#observing;
+    const observing = this.observeRuntimes();
+    this.#observing = observing;
+    try {
+      return await observing;
+    } finally {
+      this.#observing = undefined;
+    }
+  }
+
+  private async observeRuntimes(): Promise<HostedBacking[]> {
     this.usage.ensure();
     await this.finishVmRecycle();
     return this.observeOpenRuntimes();

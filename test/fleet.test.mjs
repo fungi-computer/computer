@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
 import { test } from "node:test";
+import { setImmediate } from "node:timers/promises";
 import { checkComputerGrant } from "../dist/fleet/index.js";
 import { DatabaseSync } from "node:sqlite";
 import { fromNodeSqlite } from "@fungi.computer/watchdog/node-sqlite";
@@ -634,7 +635,11 @@ const hostGrant = (computerId) => ({
 });
 
 /** One Computer on a fake clock; `vm` selects the on-box VM backing. */
-function idleFleet(t, FleetLifecycle, { vm }) {
+function idleFleet(
+  t,
+  FleetLifecycle,
+  { vm, beforeStop = () => Promise.resolve() },
+) {
   const clock = { now: 1_000_000 };
   t.mock.method(Date, "now", () => clock.now);
   const database = new DatabaseSync(":memory:");
@@ -643,7 +648,8 @@ function idleFleet(t, FleetLifecycle, { vm }) {
     : { kind: "platform-container" };
   const runtime = { running: true, runtimeId: "runtime-one", exit: null };
   const destroyed = [];
-  const stop = (reason) => {
+  const stop = async (reason) => {
+    await beforeStop();
     destroyed.push(reason);
     runtime.running = false;
     runtime.exit = { reason, exitedAt: clock.now };
@@ -669,7 +675,7 @@ function idleFleet(t, FleetLifecycle, { vm }) {
       onBoxVmHost: () => ({
         state: async () => ({ ...runtime }),
         destroy: async () => {
-          stop("destroyed");
+          await stop("destroyed");
           return { ok: true };
         },
       }),
@@ -687,6 +693,62 @@ function idleFleet(t, FleetLifecycle, { vm }) {
 
 for (const vm of [false, true]) {
   const name = vm ? "an on-box VM" : "a platform container";
+  test(`a command arriving while ${name} sleeps waits for shutdown and the ended interval`, async (t) => {
+    const { FleetLifecycle } = await import("../dist/fleet/index.js");
+    const stopping = Promise.withResolvers();
+    const stopped = Promise.withResolvers();
+    const { clock, database, backing, runtime, fleet, interval } = idleFleet(
+      t,
+      FleetLifecycle,
+      {
+        vm,
+        beforeStop: async () => {
+          stopping.resolve();
+          await stopped.promise;
+        },
+      },
+    );
+    let observation;
+    let command;
+    let entered = false;
+    try {
+      const lastActivity = clock.now;
+      clock.now += sleepWindow;
+      observation = fleet.observe();
+      await stopping.promise;
+      command = fleet.run(hostGrant("sleeper"), backing, async () => {
+        entered = true;
+        assert.equal(runtime.running, false);
+        assert.equal(interval().ended, true);
+        // The ordinary Workspace callback can now boot a replacement runtime.
+        runtime.running = true;
+        runtime.runtimeId = "runtime-two";
+        fleet.containerRuntimeStarted({
+          runtimeId: runtime.runtimeId,
+          backing,
+          startedAt: clock.now,
+        });
+        return "command completed";
+      });
+      // Observe a rejection without leaving an unhandled promise during cleanup.
+      const result = command.then(
+        (value) => ({ value }),
+        (error) => ({ error }),
+      );
+      await setImmediate();
+      assert.equal(entered, false, "execution must wait for the idle stop");
+      stopped.resolve();
+      await observation;
+      assert.deepEqual(await result, { value: "command completed" });
+      assert.equal(interval().observedAt, lastActivity);
+      assert.equal(runtime.running, true);
+    } finally {
+      stopped.resolve();
+      await Promise.allSettled([observation, command]);
+      database.close();
+    }
+  });
+
   test(`${name} sleeps after the idle window and is metered only to its last activity`, async (t) => {
     const { FleetLifecycle } = await import("../dist/fleet/index.js");
     const { clock, database, backing, destroyed, fleet, interval } = idleFleet(

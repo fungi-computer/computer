@@ -1,9 +1,15 @@
 /* global setImmediate */
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import childProcess from "node:child_process";
+import { syncBuiltinESMExports } from "node:module";
 import { test } from "node:test";
 import process from "node:process";
-import { stopProofWorker, waitForProofWorker } from "./proof-worker.mjs";
+import {
+  proofWorkers,
+  stopProofWorker,
+  waitForProofWorker,
+} from "./proof-worker.mjs";
 
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 
@@ -140,4 +146,47 @@ test("Wrangler exiting before readiness refuses startup immediately", async () =
   server.emit("exit", 1, null);
   assert.equal(await ready, false);
   assert.equal(server.listenerCount("message"), 0);
+});
+
+test("startup output survives a worker whose detached child keeps its pipes open", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const server = new EventEmitter();
+  server.pid = 123;
+  server.exitCode = null;
+  server.signalCode = null;
+  server.stdout = new EventEmitter();
+  server.stderr = new EventEmitter();
+  server.stdout.closed = false;
+  server.stderr.closed = false;
+  t.mock.method(childProcess, "spawn", () => server);
+  t.mock.method(process, "kill", () => true);
+  syncBuiltinESMExports();
+  t.after(() => {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  });
+  const workers = await proofWorkers("startup-output");
+  try {
+    const starting = workers.start();
+    // Port allocation is real, so wait for the captured child to be observed.
+    while (server.stderr.listenerCount("data") === 0) await flush();
+    server.stderr.emit("data", "Docker image compilation failed");
+    server.exitCode = 1;
+    server.emit("exit", 1, null);
+    const refused = assert.rejects(starting, (error) => {
+      assert.ok(error instanceof AggregateError);
+      assert.equal(error.errors.length, 2);
+      assert.equal(error.cause, error.errors[1]);
+      assert.match(error.errors[0].message, /Docker image compilation failed/);
+      assert.match(error.errors[1].message, /did not close after SIGKILL/);
+      return true;
+    });
+    await flush();
+    t.mock.timers.tick(12_001);
+    await flush();
+    t.mock.timers.tick(12_001);
+    await refused;
+  } finally {
+    await workers.dispose();
+  }
 });
