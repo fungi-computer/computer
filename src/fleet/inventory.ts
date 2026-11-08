@@ -165,9 +165,10 @@ export function createFleetInventory(
           .exec(`${selectRow} WHERE computer_id=?`, receipt.data.computer_id)
           .toArray()[0],
       );
+      if (stored.success && stored.data.active === 0)
+        throw new ComputerInventoryError("request_conflict");
       if (
         !stored.success ||
-        stored.data.active === 0 ||
         stored.data.name !== receipt.data.name ||
         stored.data.actor_kind !== receipt.data.actor_kind ||
         stored.data.actor_id !== receipt.data.actor_id
@@ -216,5 +217,51 @@ export function createFleetInventory(
       return created;
     });
 
-  return { ensure, replay, create, read, list, ids, count };
+  /** Who created an active Computer; authorization belongs to the host. */
+  const creator = (computerId: string): FleetActor | null => {
+    const raw = sql
+      .exec(`${selectRow} WHERE computer_id=?`, computerId)
+      .toArray()[0];
+    if (raw === undefined) return null;
+    const row = rowSchema.safeParse(raw);
+    if (!row.success) throw new ComputerInventoryError("partial_init");
+    return row.data.active === 0
+      ? null
+      : { kind: row.data.actor_kind, id: row.data.actor_id };
+  };
+
+  /**
+   * Retire a Computer: it leaves the inventory, its name becomes free, and a
+   * replayed create refuses. The row stays as the retirement record so a
+   * retried teardown still knows the Computer was this Team's.
+   */
+  const retire = (computerId: string): "retired" | "already_retired" | null =>
+    options.transactionSync(() => {
+      const raw = sql
+        .exec(`${selectRow} WHERE computer_id=?`, computerId)
+        .toArray()[0];
+      if (raw === undefined) return null;
+      const row = rowSchema.safeParse(raw);
+      if (!row.success) throw new ComputerInventoryError("partial_init");
+      if (row.data.active === 0) return "already_retired";
+      // The Computer ID is unique, so it frees the name without a collision.
+      sql.exec(
+        "UPDATE hub_team_computers SET active=0,name=computer_id,updated_at=? WHERE computer_id=?",
+        Date.now(),
+        computerId,
+      );
+      return "retired";
+    });
+
+  return {
+    ensure,
+    replay,
+    create,
+    read,
+    creator,
+    retire,
+    list,
+    ids,
+    count,
+  };
 }

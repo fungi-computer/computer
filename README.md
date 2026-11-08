@@ -1,93 +1,21 @@
-# Computer runtime
+# Computer (`@fungi.computer/computer`)
 
-This private runtime hosts one logical Fungi Computer: a SQLite-backed workspace
-of files, admitted operations, and optional execution backends. The Hub composes
-it with Team authorization, capacity and billing. The runtime is not an
-independently installed npm VM service and does not own Team roles.
+A Fungi Computer is a durable workspace for Agents: files in SQLite inside a
+Durable Object, with a Linux container or an in-Worker shell behind it to run
+commands, processes and ports. Oyster's standalone host runs one; the Fungi Hub
+composes it with Team authorization, capacity and billing.
 
-## Fleet contracts
+## Install
 
-Node tooling and browser consumers can import the grant/fact schemas and types
-from `@fungi.computer/computer/fleet/wire`, and backing descriptions from
-`@fungi.computer/computer/backing`. These entries do not load Worker runtime
-declarations. The `./fleet` lifecycle and main Computer entry require the host
-runtime's Cloudflare Workers types.
-
-The packed stranger check exercises these Node-safe entries and the egress
-helpers after a cold install of the runtime closure. The fork's companion check
-parses the published shell-module groups used by the Computer image with Acorn
-and checks their declarations. Neither check starts a Computer, executes a
-Worker shell, or qualifies the Worker/Workspace/Git SDK in a Node type
-environment.
-
-`@fungi.computer/computer/fleet` owns the host-neutral grant check, backing
-records and fact contracts. A host authenticates its caller and supplies a
-`ComputerGrant`: one Computer, explicit actions, an expiry, optional host-owned
-egress data, plus opaque actor/invocation provenance. `checkComputerGrant`
-returns `admitted` or `Refused`; grants impose no paid-usage budget. A caller's
-per-command timeout remains a command parameter enforced by the operation
-executor. Hub credit enforcement remains on its existing funded/unfunded
-admission and `creditChanged` → credit-publication restate/stop path.
-
-`createFleetBacking` accepts the maintained SQLite owner. Creation records a
-plain backing decision once. Explicit fleet-default and Computer overrides
-remain possible; local attachment keeps replay identity, actor ownership and
-detach cancellation. Mutations return complete backend projections rather than
-calling a host or delivering messages. The composing host can include the call
-and durable outbox staging in its SQLite transaction. Its deployment chooses the
-offered backing kinds; the fleet never rereads deployment configuration.
-
-`ComputerFact` describes process exit, file writes, egress, lifecycle and
-runtime interval observations with provenance. CPU time is nullable when
-unmeasured. The host reads these records and owns settlement and delivery.
-Host-specific egress data is decoded by its host; the fleet contract carries
-JSON data without importing the host's policy.
-
-The fleet also owns inventory/replay receipts, running-slot storage, runtime
-intervals, and native lifecycle activity/recycling. Inventory admission stays at
-the host: an existing create receipt is checked before funding a new create.
-Slot capacity is explicit infrastructure input; grants carry no usage cap.
-`FleetLifecycle.run` checks a host-issued start grant before native execution.
-The host consumes returned reservation/diagnostic facts and
-`ComputerRuntimeUsage.pendingFacts` interval facts; it owns credit changes,
-usage delivery, logging, and Team Git. Acknowledgment retains the existing
-runtime checkpoint identity and occurs only after delivery. Transport activity,
-idle sleep, and VM recycle sequencing retain the existing runtime behavior. The
-Hub records creation backing facts for its declared known Computers at
-initialization; the fleet never derives missing records on reads.
-
-The Hub projects each current resource decision into a grant for the requested
-Files or execution permission. It carries the stored decision's expiry and
-actor/attachment identity. Native acceptance still rechecks the current Hub
-decision before fleet admission; a grant is never cached across that check. The
-Hub projects interval facts into its existing usage Post payload without
-changing billing or credit-stop behavior.
-
-The repository architecture test rejects upward imports from this runtime into
-Apps, Billing, Broker or Team/plan modules, including type and dynamic imports.
-
-## Source setup
-
-Use a configured repository checkout with the pinned Node and pnpm tools. Run
-from the repository root:
+Install it beside Oyster, whose example `wrangler.jsonc` builds the Computer's
+container from this package's `Dockerfile`:
 
 ```sh
-pnpm turbo:run run build --filter=@fungi.computer/computer
-pnpm --filter @fungi.computer/computer typecheck
-pnpm --filter @fungi.computer/computer lint
-pnpm turbo:run run test --filter=@fungi.computer/computer
+npm install @fungi.computer/oyster @fungi.computer/computer
 ```
 
-The build emits the runtime and copies its daemon/build assets. The test graph
-assembles and builds the local container image before starting native Worker
-checks. Docker owns its layer cache; the image build has a separate bounded
-proof lifetime, so cold compilation does not consume the Worker response
-deadline. Before invoking a native test file directly, run
-`pnpm turbo:run run build:container --filter=@fungi.computer/computer`.
-
-The test suite uses disposable Workers and proof containers, so container proofs
-require a working local Docker/Workers environment. These commands do not deploy
-a Hub, publish an App or replace a production Computer image.
+The [Oyster README](https://github.com/fungi-computer/oyster) deploys both. The
+runtime itself does not own Team roles or billing.
 
 ## Files and operation results
 
@@ -212,6 +140,67 @@ Computer control endpoints to the browser.
 the host's admitted egress composition; a native container binding and the
 on-box host adapter are separate configuration paths.
 
+## Fleet contracts
+
+Node tooling and browser consumers can import the grant/fact schemas and types
+from `@fungi.computer/computer/fleet/wire`, and backing descriptions from
+`@fungi.computer/computer/backing`. These entries do not load Worker runtime
+declarations. The `./fleet` lifecycle and main Computer entry require the host
+runtime's Cloudflare Workers types.
+
+The packed stranger check exercises these Node-safe entries and the egress
+helpers after a cold install of the runtime closure. The fork's companion check
+parses the published shell-module groups used by the Computer image with Acorn
+and checks their declarations. Neither check starts a Computer, executes a
+Worker shell, or qualifies the Worker/Workspace/Git SDK in a Node type
+environment.
+
+`@fungi.computer/computer/fleet` owns the host-neutral grant check, backing
+records and fact contracts. A host authenticates its caller and supplies a
+`ComputerGrant`: one Computer, explicit actions, an expiry, optional host-owned
+egress data, plus opaque actor/invocation provenance. `checkComputerGrant`
+returns `admitted` or `Refused`; grants impose no paid-usage budget. A caller's
+per-command timeout remains a command parameter enforced by the operation
+executor. Hub credit enforcement remains on its existing funded/unfunded
+admission and `creditChanged` → credit-publication restate/stop path.
+
+`createFleetBacking` accepts the maintained SQLite owner. Creation records a
+plain backing decision once. Explicit fleet-default and Computer overrides
+remain possible; local attachment keeps replay identity, actor ownership and
+detach cancellation. Mutations return complete backend projections rather than
+calling a host or delivering messages. The composing host can include the call
+and durable outbox staging in its SQLite transaction. Its deployment chooses the
+offered backing kinds; the fleet never rereads deployment configuration.
+
+`ComputerFact` describes process exit, file writes, egress, lifecycle and
+runtime interval observations with provenance. CPU time is nullable when
+unmeasured. The host reads these records and owns settlement and delivery.
+Host-specific egress data is decoded by its host; the fleet contract carries
+JSON data without importing the host's policy.
+
+The fleet also owns inventory/replay receipts, running-slot storage, runtime
+intervals, and native lifecycle activity/recycling. Inventory admission stays at
+the host: an existing create receipt is checked before funding a new create.
+Slot capacity is explicit infrastructure input; grants carry no usage cap.
+`FleetLifecycle.run` checks a host-issued start grant before native execution.
+The host consumes returned reservation/diagnostic facts and
+`ComputerRuntimeUsage.pendingFacts` interval facts; it owns credit changes,
+usage delivery, logging, and Team Git. Acknowledgment retains the existing
+runtime checkpoint identity and occurs only after delivery. Transport activity,
+idle sleep, and VM recycle sequencing retain the existing runtime behavior. The
+Hub records creation backing facts for its declared known Computers at
+initialization; the fleet never derives missing records on reads.
+
+The Hub projects each current resource decision into a grant for the requested
+Files or execution permission. It carries the stored decision's expiry and
+actor/attachment identity. Native acceptance still rechecks the current Hub
+decision before fleet admission; a grant is never cached across that check. The
+Hub projects interval facts into its existing usage Post payload without
+changing billing or credit-stop behavior.
+
+The repository architecture test rejects upward imports from this runtime into
+Apps, Billing, Broker or Team/plan modules, including type and dynamic imports.
+
 ## Image and build inputs
 
 The [Dockerfile](Dockerfile) builds the Linux environment with pinned Node,
@@ -261,3 +250,28 @@ service-relative routing. The host supplies its selector decoder, hostname
 policy and live admission callback. Admission runs at the exposed-port listing
 and forwarding acceptance points; a ticket is never a grant. Hub retains its
 local App projection and signed-ticket hostname configuration.
+
+## Contribute
+
+Use a configured repository checkout with the pinned Node and pnpm tools. Run
+from the repository root:
+
+```sh
+pnpm turbo:run run build --filter=@fungi.computer/computer
+pnpm --filter @fungi.computer/computer typecheck
+pnpm --filter @fungi.computer/computer lint
+pnpm turbo:run run test --filter=@fungi.computer/computer
+```
+
+The build emits the runtime and copies its daemon/build assets. The test graph
+assembles and builds the local container image before starting native Worker
+checks. Docker owns its layer cache; the image build has a separate bounded
+proof lifetime, so cold compilation does not consume the Worker response
+deadline. Before invoking a native test file directly, run
+`pnpm turbo:run run build:container --filter=@fungi.computer/computer`.
+
+The test suite uses disposable Workers and proof containers, so container proofs
+require a working local Docker/Workers environment. These commands do not deploy
+a Hub, publish an App or replace a production Computer image.
+
+MIT. See [`LICENSE`](LICENSE).

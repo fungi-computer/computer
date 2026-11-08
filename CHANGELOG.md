@@ -1,5 +1,23 @@
 # @fungi.computer/computer
 
+## 0.7.0
+
+### Minor Changes
+
+- Changes since 0.6.3:
+
+  - feat(hub): delete a Computer through the Team Computers door
+
+### Patch Changes
+
+- Updated dependencies
+- Updated dependencies
+  - @fungi.computer/cordyceps@0.4.1
+  - @fungi.computer/watchdog@0.1.3
+  - @fungi.computer/knapsack@0.4.8
+  - @fungi.computer/computer-contract@0.0.13
+  - @fungi.computer/seam@0.2.5
+
 ## 0.6.3
 
 ### Patch Changes

@@ -347,6 +347,36 @@ test("fleet inventory preserves create identity and exposes replay before host a
   }
 });
 
+test("fleet inventory retires a Computer once, freeing its name and refusing its replay", async () => {
+  const { createFleetInventory } = await import("../dist/fleet/index.js");
+  const database = new DatabaseSync(":memory:");
+  try {
+    const inventory = createFleetInventory(fromNodeSqlite(database));
+    inventory.ensure();
+    const actor = { kind: "user", id: "one" };
+    const request = { name: "Cedar", requestId: "create-one" };
+    const created = inventory.create(actor, request);
+    assert.deepEqual(inventory.creator(created.computerId), actor);
+    assert.equal(inventory.retire(created.computerId), "retired");
+    assert.equal(inventory.retire(created.computerId), "already_retired");
+    assert.equal(inventory.retire("computer_unknown"), null);
+    assert.equal(inventory.read(created.computerId), null);
+    assert.equal(inventory.creator(created.computerId), null);
+    assert.deepEqual(inventory.ids(), []);
+    assert.throws(() => inventory.replay(actor, request), {
+      code: "request_conflict",
+    });
+    const renamed = inventory.create(actor, {
+      name: "Cedar",
+      requestId: "create-two",
+    });
+    assert.equal(renamed.name, "Cedar");
+    assert.notEqual(renamed.computerId, created.computerId);
+  } finally {
+    database.close();
+  }
+});
+
 test("fleet slots retain idempotent reservation and report unavailable storage as data", async () => {
   const { createFleetSlots } = await import("../dist/fleet/index.js");
   const database = new DatabaseSync(":memory:");
