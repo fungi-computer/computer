@@ -85,6 +85,9 @@ import {
   processIdInputSchema,
   processKillOutputSchema,
   processListOutputSchema,
+  processLogsInputSchema,
+  processLogsOutputSchema,
+  maximumProcessLogLines,
   processStartInputSchema,
   processStartToolInputSchema,
   ComputerProcessNotFoundError,
@@ -105,6 +108,7 @@ import { applyWorkspacePatch } from "./files-patch.js";
 import {
   ComputerProcessInventory,
   drainProcessExit,
+  ProcessLogTail,
   failedObservation,
   observeProcess,
   type ProcessObservation,
@@ -1727,6 +1731,29 @@ export class ComputerDO extends ContainerComputer implements ComputerFilesRpc {
     return process;
   }
 
+  /** The retained last output lines of one process, with its record. */
+  processLogs(input: ComputerValue): z.output<typeof processLogsOutputSchema> {
+    return this.processLogsAfterAcceptance(input, () => undefined);
+  }
+
+  protected processLogsAfterAcceptance(
+    input: ComputerValue,
+    accept: () => void,
+  ): z.output<typeof processLogsOutputSchema> {
+    const { id, lines } = processLogsInputSchema.parse(input);
+    accept();
+    const row = this.#processes.get(id);
+    const log = this.#processes.logOf(id);
+    if (row === undefined || log === undefined)
+      throw new ComputerProcessNotFoundError(id);
+    const wanted = lines ?? maximumProcessLogLines;
+    return processLogsOutputSchema.parse({
+      process: this.#processReceipt(row),
+      lines: log.lines.slice(-wanted),
+      truncated: log.truncated || log.lines.length > wanted,
+    });
+  }
+
   /** Send SIGTERM to one running process; its exit is recorded when observed. */
   async killProcess(
     input: ComputerValue,
@@ -1883,7 +1910,18 @@ export class ComputerDO extends ContainerComputer implements ComputerFilesRpc {
     run: WorkspaceRuntimeExecHandle<"utf8">,
   ): Promise<void> {
     try {
-      const settled = await drainProcessExit(run);
+      const tail = new ProcessLogTail();
+      let lastSaved = 0;
+      const settled = await drainProcessExit(run, (text) => {
+        tail.push(text);
+        // Output is saved at most once a second while the process runs.
+        const now = Date.now();
+        if (now - lastSaved >= 1_000) {
+          lastSaved = now;
+          this.#processes.setLog(id, tail.snapshot());
+        }
+      });
+      this.#processes.setLog(id, tail.snapshot());
       if (settled !== undefined) {
         this.#settle(id, {
           state: "exited",

@@ -1,5 +1,19 @@
 # @fungi.computer/computer
 
+## 0.8.0
+
+### Minor Changes
+
+- Changes since 0.7.0:
+
+  - feat(computer): retain process output and serve the last lines
+
+### Patch Changes
+
+- Updated dependencies
+  - @fungi.computer/computer-contract@0.1.0
+  - @fungi.computer/knapsack@0.4.9
+
 ## 0.7.0
 
 ### Minor Changes

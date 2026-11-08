@@ -20,6 +20,7 @@ export const computerActionSchema = z.enum([
   "processStart",
   "processList",
   "processKill",
+  "processLogs",
   "exposePort",
   "unexposePort",
   "listPorts",

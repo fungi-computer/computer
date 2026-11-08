@@ -13,6 +13,8 @@ import {
   ComputerPortLimitError,
   isComputerReservedPort,
   maximumExposedPorts,
+  maximumProcessLogLineCharacters,
+  maximumProcessLogLines,
   maximumProcessRecords,
   maximumRunningProcesses,
   type ComputerProcess,
@@ -39,6 +41,8 @@ type ProcessRow = {
   sync: string;
   started_at: number;
   ended_at: number | null;
+  log_tail: string;
+  log_truncated: number;
 };
 function toProcess(row: ProcessRow): ComputerProcess {
   return computerProcessSchema.parse({
@@ -63,7 +67,61 @@ function toProcess(row: ProcessRow): ComputerProcess {
  * storage (confirmed in workerd; node:sqlite does not enforce the same
  * sandbox, so a unit test against it alone would hide this).
  */
-const processSchemaVersion = 2;
+const processSchemaVersion = 3;
+
+/** The retained last output lines of one process. */
+export type ProcessLogSnapshot = Readonly<{
+  lines: readonly string[];
+  truncated: boolean;
+}>;
+
+/** At most this many bytes of output text are retained per process. */
+const maximumLogBytes = 64 * 1024;
+
+/**
+ * Keeps the last lines a process wrote, bounded by line count, line length
+ * and total size. A partial last line is held until its newline arrives or
+ * the snapshot is read.
+ */
+export class ProcessLogTail {
+  #lines: string[] = [];
+  #partial = "";
+  #truncated = false;
+  /** Add a chunk of stdout or stderr text. */
+  push(chunk: string): void {
+    const parts = (this.#partial + chunk).split("\n");
+    this.#partial = parts.pop() ?? "";
+    for (const part of parts) this.#lines.push(clipLine(part));
+    this.#partial = clipLine(this.#partial);
+    this.#trim();
+  }
+  /** The retained lines, including any unfinished last line. */
+  snapshot(): ProcessLogSnapshot {
+    const lines =
+      this.#partial === "" ? this.#lines : [...this.#lines, this.#partial];
+    return {
+      lines: lines.slice(-maximumProcessLogLines),
+      truncated: this.#truncated,
+    };
+  }
+  #trim(): void {
+    let bytes = 0;
+    for (const line of this.#lines) bytes += line.length + 1;
+    while (
+      this.#lines.length > maximumProcessLogLines ||
+      (bytes > maximumLogBytes && this.#lines.length > 1)
+    ) {
+      const dropped = this.#lines.shift();
+      bytes -= (dropped?.length ?? 0) + 1;
+      this.#truncated = true;
+    }
+  }
+}
+function clipLine(line: string): string {
+  return line.length > maximumProcessLogLineCharacters
+    ? line.slice(0, maximumProcessLogLineCharacters)
+    : line;
+}
 
 /** Computer-owned replay identities; computerd owns execution and exit observations. */
 export class ComputerProcessInventory {
@@ -92,7 +150,7 @@ export class ComputerProcessInventory {
         );
       }
       storage.sql.exec(
-        "CREATE TABLE IF NOT EXISTS computer_processes (id TEXT PRIMARY KEY, request_scope TEXT NOT NULL, request_id TEXT NOT NULL, input_hash TEXT NOT NULL, command TEXT NOT NULL, cwd TEXT, port INTEGER, state TEXT NOT NULL CHECK (state IN ('running','exited')), exit_code INTEGER, sync TEXT NOT NULL DEFAULT 'unknown' CHECK (sync IN ('synced','pending','unknown')), started_at INTEGER NOT NULL, ended_at INTEGER, CHECK ((state = 'running') = (ended_at IS NULL)), UNIQUE(request_scope, request_id)) STRICT",
+        "CREATE TABLE IF NOT EXISTS computer_processes (id TEXT PRIMARY KEY, request_scope TEXT NOT NULL, request_id TEXT NOT NULL, input_hash TEXT NOT NULL, command TEXT NOT NULL, cwd TEXT, port INTEGER, state TEXT NOT NULL CHECK (state IN ('running','exited')), exit_code INTEGER, sync TEXT NOT NULL DEFAULT 'unknown' CHECK (sync IN ('synced','pending','unknown')), started_at INTEGER NOT NULL, ended_at INTEGER, log_tail TEXT NOT NULL DEFAULT '', log_truncated INTEGER NOT NULL DEFAULT 0, CHECK ((state = 'running') = (ended_at IS NULL)), UNIQUE(request_scope, request_id)) STRICT",
       );
       storage.sql.exec(
         "CREATE TABLE IF NOT EXISTS computer_exposed_ports (port INTEGER PRIMARY KEY CHECK (port BETWEEN 1 AND 65535), process_id TEXT) STRICT",
@@ -219,6 +277,26 @@ export class ComputerProcessInventory {
       );
       return this.#require(id);
     });
+  }
+  /** Replace the retained output tail of one process, if its record is still kept. */
+  setLog(id: ComputerProcessId, tail: ProcessLogSnapshot): void {
+    this.#storage.sql.exec(
+      "UPDATE computer_processes SET log_tail = ?, log_truncated = ? WHERE id = ?",
+      tail.lines.join("\n"),
+      tail.truncated ? 1 : 0,
+      id,
+    );
+  }
+  /** The retained output tail of one process, or undefined when no record is kept. */
+  logOf(id: ComputerProcessId): ProcessLogSnapshot | undefined {
+    const row = this.#storage.sql
+      .exec<ProcessRow>("SELECT * FROM computer_processes WHERE id = ?", id)
+      .toArray()[0];
+    if (row === undefined) return undefined;
+    return {
+      lines: row.log_tail === "" ? [] : row.log_tail.split("\n"),
+      truncated: row.log_truncated === 1,
+    };
   }
   /** Retain a failed dispatch receipt: retrying that key cannot create new work. */
   release(id: ComputerProcessId): void {
@@ -485,6 +563,7 @@ export async function observeProcess(
  */
 export async function drainProcessExit(
   run: WorkspaceRuntimeExecHandle<"utf8">,
+  onOutput?: (text: string) => void,
 ): Promise<
   | Readonly<{
       exitCode: number;
@@ -505,6 +584,8 @@ export async function drainProcessExit(
     for (;;) {
       const next = await reader.read();
       if (next.done) break;
+      if (next.value.name === "stdout" || next.value.name === "stderr")
+        onOutput?.(next.value.value);
       if (next.value.name === "exit") {
         exitCode = next.value.code;
         const drained = await drainPastExit(reader);

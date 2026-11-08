@@ -16,6 +16,7 @@ import {
   drainProcessExit,
   liveProbeMs,
   observeProcess,
+  ProcessLogTail,
   postExitDrainDeadlineMs,
 } from "../dist/process-inventory.js";
 import { PullPendingTracker } from "../dist/pull-pending.js";
@@ -872,3 +873,47 @@ test("PullPendingTracker is a faithful delegate for @cloudflare/computer's retry
 });
 
 console.log(JSON.stringify({ proof: "computer-process-inventory" }));
+
+test("a process keeps the last output lines it wrote, bounded, and they survive reconstruction", async () => {
+  const storage = sqliteStorage();
+  const now = clock();
+  const inventory = new ComputerProcessInventory(storage, now);
+  const { process: admitted } = inventory.admit(
+    {
+      requestScope: "owner:fixture",
+      requestId: mintComputerRequestId(),
+      command: "pnpm build",
+    },
+    "pnpm-build",
+    accept,
+  );
+  const tail = new ProcessLogTail();
+  const run = stream(
+    [
+      { id: "a", seq: 1, name: "stdout", value: "one\ntw" },
+      { id: "a", seq: 2, name: "stderr", value: "o\nthree" },
+      { id: "a", seq: 3, name: "exit", code: 2 },
+    ],
+    false,
+  );
+  const settled = await drainProcessExit(run, (text) => {
+    tail.push(text);
+  });
+  assert.equal(settled.exitCode, 2);
+  inventory.setLog(admitted.id, tail.snapshot());
+  const reopened = new ComputerProcessInventory(storage, now);
+  assert.deepEqual(reopened.logOf(admitted.id), {
+    lines: ["one", "two", "three"],
+    truncated: false,
+  });
+  assert.equal(reopened.logOf("process-that-was-never-started"), undefined);
+
+  const long = new ProcessLogTail();
+  for (let line = 0; line < 500; line += 1) long.push(`line ${String(line)}\n`);
+  long.push("x".repeat(5_000));
+  const kept = long.snapshot();
+  assert.equal(kept.lines.length, 200);
+  assert.equal(kept.truncated, true);
+  assert.equal(kept.lines.at(-2), "line 499");
+  assert.equal(kept.lines.at(-1)?.length, 2_000);
+});
