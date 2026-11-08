@@ -1,5 +1,12 @@
 # @fungi.computer/computer
 
+## 0.8.1
+
+### Patch Changes
+
+- Updated dependencies
+  - @fungi.computer/cordyceps@0.4.2
+
 ## 0.8.0
 
 ### Minor Changes
