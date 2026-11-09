@@ -1,5 +1,13 @@
 # @fungi.computer/computer
 
+## 0.8.2
+
+### Patch Changes
+
+- Changes since 0.8.1:
+
+  - fix(oyster): run trial Computers in a workspace sandbox
+
 ## 0.8.1
 
 ### Patch Changes

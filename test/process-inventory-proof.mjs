@@ -143,18 +143,19 @@ test("same invocation key cannot cross member, actor kind or method scopes", () 
     requestId: "same",
     command: "a",
   };
-  const a = inventory.admit(first, "a", accept).process;
+  const a = inventory.admit("container", first, "a", accept).process;
   assert.equal(
-    inventory.admit(first, "a", accept).process.id,
+    inventory.admit("container", first, "a", accept).process.id,
     a.id,
     "same command is the one invocation's retry",
   );
   assert.throws(
-    () => inventory.admit({ ...first, command: "b" }, "b", accept),
+    () => inventory.admit("container", { ...first, command: "b" }, "b", accept),
     /already bound/,
     "a second command in one invocation conflicts",
   );
   const secondInvocation = inventory.admit(
+    "container",
     { ...first, requestId: "next-invocation", command: "b" },
     "b",
     accept,
@@ -171,6 +172,7 @@ test("same invocation key cannot cross member, actor kind or method scopes", () 
     scope("start", "team-key", "a"),
   ]) {
     const row = inventory.admit(
+      "container",
       { ...first, requestScope, command: "b" },
       "b",
       accept,
@@ -204,12 +206,13 @@ test("a replay key returns one process and changed input conflicts", () => {
     command: "sleep 600",
     port: 3000,
   };
-  const first = inventory.admit(input, "same-input", accept);
-  const replay = inventory.admit(input, "same-input", accept);
+  const first = inventory.admit("container", input, "same-input", accept);
+  const replay = inventory.admit("container", input, "same-input", accept);
   assert.equal(replay.created, false);
   assert.equal(replay.process.id, first.process.id);
   assert.equal(inventory.list().length, 1);
   const otherScope = inventory.admit(
+    "container",
     { ...input, requestScope: "installation:other", port: undefined },
     "no-port",
     accept,
@@ -218,7 +221,12 @@ test("a replay key returns one process and changed input conflicts", () => {
   assert.notEqual(otherScope.process.id, first.process.id);
   assert.throws(
     () =>
-      inventory.admit({ ...input, command: "other" }, "other-input", accept),
+      inventory.admit(
+        "container",
+        { ...input, command: "other" },
+        "other-input",
+        accept,
+      ),
     /already bound/,
   );
 });
@@ -230,14 +238,14 @@ test("an in-flight replay does not claim a dispatch succeeded", () => {
     requestId: "pending",
     command: "sleep",
   };
-  const original = inventory.admit(input, "sleep", accept).process;
+  const original = inventory.admit("container", input, "sleep", accept).process;
   assert.equal(inventory.replay(input, "sleep", accept).state, "uncertain");
   assert.equal(
-    inventory.admit(input, "sleep", accept).process.state,
+    inventory.admit("container", input, "sleep", accept).process.state,
     "uncertain",
   );
   inventory.release(original.id);
-  const retry = inventory.admit(input, "sleep", accept);
+  const retry = inventory.admit("container", input, "sleep", accept);
   assert.equal(retry.created, false);
   assert.equal(retry.process.id, original.id);
   assert.equal(retry.process.state, "exited");
@@ -254,14 +262,24 @@ test("identity survives reconstruction and exits are recorded once", () => {
     command: "pnpm dev",
     cwd: "/workspace",
   };
-  const { process: admitted } = first.admit(input, "pnpm-dev", () => {
-    accepted += 1;
-  });
+  const { process: admitted } = first.admit(
+    "container",
+    input,
+    "pnpm-dev",
+    () => {
+      accepted += 1;
+    },
+  );
   const id = admitted.id;
   assert.equal(accepted, 1);
   assert.equal(admitted.state, "running");
 
   const reopened = new ComputerProcessInventory(storage, now);
+  assert.equal(
+    reopened.backend(admitted.id),
+    "container",
+    "reopening retains the exact execution backend",
+  );
   assert.deepEqual(reopened.get(id), admitted, "a new isolate sees the row");
   assert.equal(reopened.exited(id, 0).exitCode, 0);
   assert.equal(reopened.exited(id, 9).exitCode, 0, "first exit wins");
@@ -272,6 +290,7 @@ test("identity survives reconstruction and exits are recorded once", () => {
 test("a process is unknown-synced unless its drained exit reported real pull evidence", () => {
   const inventory = new ComputerProcessInventory(sqliteStorage(), clock());
   const running = inventory.admit(
+    "container",
     {
       requestScope: "owner:fixture",
       requestId: "default-sync",
@@ -292,6 +311,7 @@ test("a process is unknown-synced unless its drained exit reported real pull evi
   );
 
   const pending = inventory.admit(
+    "container",
     {
       requestScope: "owner:fixture",
       requestId: "pending-sync",
@@ -321,6 +341,7 @@ test("a process is unknown-synced unless its drained exit reported real pull evi
 test("resync upgrades an already-exited row's sync, and only an exited one", () => {
   const inventory = new ComputerProcessInventory(sqliteStorage(), clock());
   const running = inventory.admit(
+    "container",
     { requestScope: "owner:fixture", requestId: "running", command: "true" },
     "running",
     accept,
@@ -333,6 +354,7 @@ test("resync upgrades an already-exited row's sync, and only an exited one", () 
   );
 
   const exited = inventory.admit(
+    "container",
     { requestScope: "owner:fixture", requestId: "exited", command: "true" },
     "exited",
     accept,
@@ -358,25 +380,30 @@ test("running slots and retained replay records are bounded", () => {
   });
   const ids = Array.from(
     { length: maximumRunningProcesses },
-    () => inventory.admit(input(), "sleep", accept).process.id,
+    () => inventory.admit("container", input(), "sleep", accept).process.id,
   );
   assert.throws(
-    () => inventory.admit(input(), "sleep", accept),
+    () => inventory.admit("container", input(), "sleep", accept),
     ComputerProcessLimitError,
   );
   for (const id of ids) inventory.exited(id, 0);
   const old = input();
-  inventory.admit(old, "old", accept);
+  inventory.admit("container", old, "old", accept);
   inventory.exited(inventory.replay(old, "old", accept).id, 0);
   for (let index = 0; index < maximumProcessRecords + 10; index += 1) {
     now += 1_000;
-    const admitted = inventory.admit(input(), "sleep", accept).process;
+    const admitted = inventory.admit(
+      "container",
+      input(),
+      "sleep",
+      accept,
+    ).process;
     inventory.exited(admitted.id, 0);
   }
   assert.equal(inventory.list().length, maximumProcessRecords);
   assert.equal(inventory.replay(old, "old", accept), undefined);
   assert.equal(
-    inventory.admit(old, "old", accept).created,
+    inventory.admit("container", old, "old", accept).created,
     true,
     "own-scope eviction ends replay protection as documented",
   );
@@ -390,18 +417,20 @@ test("one scope cannot consume another scope's slots or evict its replay", () =>
     command: "sleep",
   });
   const retained = input("installation:B", "retained");
-  const b = inventory.admit(retained, "sleep", accept).process;
+  const b = inventory.admit("container", retained, "sleep", accept).process;
   inventory.exited(b.id, 0);
   const a = Array.from(
     { length: maximumRunningProcesses },
     (_, index) =>
       inventory.admit(
+        "container",
         input("installation:A", `running-${String(index)}`),
         "sleep",
         accept,
       ).process,
   );
   const secondB = inventory.admit(
+    "container",
     input("installation:B", "running"),
     "sleep",
     accept,
@@ -415,6 +444,7 @@ test("one scope cannot consume another scope's slots or evict its replay", () =>
   for (const row of a) inventory.exited(row.id, 0);
   for (let index = 0; index < maximumProcessRecords + 10; index += 1) {
     const row = inventory.admit(
+      "container",
       input("installation:A", `short-${String(index)}`),
       "sleep",
       accept,
@@ -433,6 +463,7 @@ test("the 64-record bound includes old running processes", () => {
   const inventory = new ComputerProcessInventory(sqliteStorage(), () => ++now);
   const start = (requestId) =>
     inventory.admit(
+      "container",
       { requestId, requestScope: "owner:fixture", command: "sleep" },
       "sleep",
       accept,
@@ -461,7 +492,7 @@ test("process and declared exposure commit or roll back together, and manual exp
       .toArray();
   assert.throws(
     () =>
-      inventory.admit(input(3000), "denied", () => {
+      inventory.admit("container", input(3000), "denied", () => {
         throw new Error("denied");
       }),
     /denied/,
@@ -470,21 +501,31 @@ test("process and declared exposure commit or roll back together, and manual exp
   assert.deepEqual(ports(), []);
   for (const port of [8080, 7681])
     assert.throws(
-      () => inventory.admit(input(port), "reserved", accept),
+      () => inventory.admit("container", input(port), "reserved", accept),
       /reserved/,
     );
   assert.deepEqual(inventory.list(), []);
   assert.deepEqual(ports(), []);
   storage.sql.exec("INSERT INTO computer_exposed_ports (port) VALUES (3000)");
-  const manual = inventory.admit(input(3000), "manual", accept).process;
-  const owned = inventory.admit(input(3001), "owned", accept).process;
+  const manual = inventory.admit(
+    "container",
+    input(3000),
+    "manual",
+    accept,
+  ).process;
+  const owned = inventory.admit(
+    "container",
+    input(3001),
+    "owned",
+    accept,
+  ).process;
   assert.equal(manual.port, 3000);
   assert.deepEqual(ports(), [
     { port: 3000, process_id: null },
     { port: 3001, process_id: owned.id },
   ]);
   assert.throws(
-    () => inventory.admit(input(3001), "collision", accept),
+    () => inventory.admit("container", input(3001), "collision", accept),
     /port is unavailable/,
   );
   assert.equal(inventory.list().length, 2);
@@ -502,10 +543,11 @@ test("two scopes racing a port get one owner and a typed opaque refusal", () => 
     command: "sleep",
     port: 4000,
   };
-  const owner = inventory.admit(input, "sleep", accept).process;
+  const owner = inventory.admit("container", input, "sleep", accept).process;
   assert.throws(
     () =>
       inventory.admit(
+        "container",
         { ...input, requestScope: "installation:B" },
         "sleep",
         accept,
@@ -536,6 +578,7 @@ test("port capacity failure reserves no process and a manual re-expose outlives 
   assert.throws(
     () =>
       inventory.admit(
+        "container",
         {
           requestScope: "owner:fixture",
           requestId: mintComputerRequestId(),
@@ -550,6 +593,7 @@ test("port capacity failure reserves no process and a manual re-expose outlives 
   assert.deepEqual(inventory.list(), []);
   storage.sql.exec("DELETE FROM computer_exposed_ports");
   const owned = inventory.admit(
+    "container",
     {
       requestScope: "owner:fixture",
       requestId: mintComputerRequestId(),
@@ -815,6 +859,7 @@ test("a schema version mismatch resets computer_processes instead of a strict wr
     "the mismatched table was reset, not preserved",
   );
   const fresh = inventory.admit(
+    "container",
     { requestScope: "owner:fresh", requestId: "fresh", command: "true" },
     "fresh",
     accept,
@@ -828,11 +873,17 @@ test("reopening a current-version table is not itself a reset", () => {
   const now = clock();
   const first = new ComputerProcessInventory(storage, now);
   const admitted = first.admit(
+    "container",
     { requestScope: "owner:fixture", requestId: "keep", command: "true" },
     "keep",
     accept,
   ).process;
   const reopened = new ComputerProcessInventory(storage, now);
+  assert.equal(
+    reopened.backend(admitted.id),
+    "container",
+    "reopening retains the exact execution backend",
+  );
   assert.deepEqual(
     reopened.get(admitted.id),
     admitted,
@@ -879,6 +930,7 @@ test("a process keeps the last output lines it wrote, bounded, and they survive 
   const now = clock();
   const inventory = new ComputerProcessInventory(storage, now);
   const { process: admitted } = inventory.admit(
+    "container",
     {
       requestScope: "owner:fixture",
       requestId: mintComputerRequestId(),
@@ -902,6 +954,11 @@ test("a process keeps the last output lines it wrote, bounded, and they survive 
   assert.equal(settled.exitCode, 2);
   inventory.setLog(admitted.id, tail.snapshot());
   const reopened = new ComputerProcessInventory(storage, now);
+  assert.equal(
+    reopened.backend(admitted.id),
+    "container",
+    "reopening retains the exact execution backend",
+  );
   assert.deepEqual(reopened.logOf(admitted.id), {
     lines: ["one", "two", "three"],
     truncated: false,

@@ -1566,9 +1566,9 @@ export class ComputerDO extends ContainerComputer implements ComputerFilesRpc {
     }
     if (start.port !== undefined && isComputerReservedPort(start.port))
       throw new ComputerPortReservedError(start.port);
-    const backend = this.requireHostedRoute().id;
+    const backend = this.routeBackend(undefined, "exec").id;
     const workspace = await this.readyWorkspace();
-    const admission = this.#processes.admit(start, inputHash, accept);
+    const admission = this.#processes.admit(backend, start, inputHash, accept);
     if (!admission.created) {
       if (executionContext !== undefined)
         await this.#renewExecution(admission.process.id);
@@ -1684,25 +1684,32 @@ export class ComputerDO extends ContainerComputer implements ComputerFilesRpc {
     });
   }
 
+  async #processBackend(id: string) {
+    const backend = this.#processes.backend(id);
+    if (backend === undefined) return undefined;
+    let route;
+    try {
+      route = this.routeBackend(backend, "exec");
+    } catch (cause) {
+      if (cause instanceof ComputerBackendUnavailableError) return undefined;
+      throw cause;
+    }
+    return route.backend.kind === "local" ||
+      (await this.containerRunning(route.backend))
+      ? route
+      : undefined;
+  }
+
   async #observeOwnedProcess(row: ComputerProcess): Promise<ComputerProcess> {
     // A reservation or unresolved SDK preparation is not a native exit.
     if (this.#processStarts.has(row.id)) return { ...row, state: "uncertain" };
     const execution = this.#executions.get(row.id);
-    let hosted = this.hostedRoute();
-    if (execution !== undefined) {
-      try {
-        hosted = this.hostedRoute(execution.backend);
-        if (hosted === undefined)
-          throw new ComputerBackendUnavailableError("no_backend");
-      } catch {
-        await this.#closeExecution(row.id, "unknown");
-        return { ...row, state: "uncertain" };
-      }
+    const hosted = await this.#processBackend(row.id);
+    if (execution !== undefined && hosted === undefined) {
+      await this.#closeExecution(row.id, "unknown");
+      return { ...row, state: "uncertain" };
     }
-    if (
-      hosted === undefined ||
-      !(await this.containerRunning(hosted.backing))
-    ) {
+    if (hosted === undefined) {
       // Never wake a stopped backend. Absence before a known native handle
       // cannot settle a dispatch whose reply was lost.
       if (execution !== undefined && !execution.nativeOpened)
@@ -1801,21 +1808,15 @@ export class ComputerDO extends ContainerComputer implements ComputerFilesRpc {
       });
     }
     const execution = this.#executions.get(id);
-    let hosted = this.hostedRoute();
-    if (execution !== undefined) {
-      try {
-        hosted = this.hostedRoute(execution.backend);
-        if (hosted === undefined)
-          throw new ComputerBackendUnavailableError("no_backend");
-      } catch {
-        await this.#closeExecution(id, "unknown");
-        return processKillOutputSchema.parse({
-          process: { ...row, state: "uncertain" },
-          signalled: false,
-        });
-      }
+    const hosted = await this.#processBackend(row.id);
+    if (execution !== undefined && hosted === undefined) {
+      await this.#closeExecution(id, "unknown");
+      return processKillOutputSchema.parse({
+        process: { ...row, state: "uncertain" },
+        signalled: false,
+      });
     }
-    if (hosted === undefined || !(await this.containerRunning(hosted.backing)))
+    if (hosted === undefined)
       return processKillOutputSchema.parse({
         process:
           execution !== undefined && !execution.nativeOpened

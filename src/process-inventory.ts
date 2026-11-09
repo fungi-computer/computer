@@ -67,7 +67,7 @@ function toProcess(row: ProcessRow): ComputerProcess {
  * storage (confirmed in workerd; node:sqlite does not enforce the same
  * sandbox, so a unit test against it alone would hide this).
  */
-const processSchemaVersion = 3;
+const processSchemaVersion = 4;
 
 /** The retained last output lines of one process. */
 export type ProcessLogSnapshot = Readonly<{
@@ -150,7 +150,7 @@ export class ComputerProcessInventory {
         );
       }
       storage.sql.exec(
-        "CREATE TABLE IF NOT EXISTS computer_processes (id TEXT PRIMARY KEY, request_scope TEXT NOT NULL, request_id TEXT NOT NULL, input_hash TEXT NOT NULL, command TEXT NOT NULL, cwd TEXT, port INTEGER, state TEXT NOT NULL CHECK (state IN ('running','exited')), exit_code INTEGER, sync TEXT NOT NULL DEFAULT 'unknown' CHECK (sync IN ('synced','pending','unknown')), started_at INTEGER NOT NULL, ended_at INTEGER, log_tail TEXT NOT NULL DEFAULT '', log_truncated INTEGER NOT NULL DEFAULT 0, CHECK ((state = 'running') = (ended_at IS NULL)), UNIQUE(request_scope, request_id)) STRICT",
+        "CREATE TABLE IF NOT EXISTS computer_processes (id TEXT PRIMARY KEY, request_scope TEXT NOT NULL, request_id TEXT NOT NULL, input_hash TEXT NOT NULL, backend TEXT NOT NULL, command TEXT NOT NULL, cwd TEXT, port INTEGER, state TEXT NOT NULL CHECK (state IN ('running','exited')), exit_code INTEGER, sync TEXT NOT NULL DEFAULT 'unknown' CHECK (sync IN ('synced','pending','unknown')), started_at INTEGER NOT NULL, ended_at INTEGER, log_tail TEXT NOT NULL DEFAULT '', log_truncated INTEGER NOT NULL DEFAULT 0, CHECK ((state = 'running') = (ended_at IS NULL)), UNIQUE(request_scope, request_id)) STRICT",
       );
       storage.sql.exec(
         "CREATE TABLE IF NOT EXISTS computer_exposed_ports (port INTEGER PRIMARY KEY CHECK (port BETWEEN 1 AND 65535), process_id TEXT) STRICT",
@@ -191,6 +191,7 @@ export class ComputerProcessInventory {
   }
   /** Reserve the process and only a newly created exposure in one transaction. */
   admit(
+    backend: string,
     input: z.output<typeof processStartInputSchema>,
     inputHash: string,
     accept: () => void,
@@ -237,11 +238,12 @@ export class ComputerProcessInventory {
         }
       }
       this.#storage.sql.exec(
-        "INSERT INTO computer_processes (id, request_scope, request_id, input_hash, command, cwd, port, state, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'running', ?)",
+        "INSERT INTO computer_processes (id, request_scope, request_id, input_hash, backend, command, cwd, port, state, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'running', ?)",
         id,
         input.requestScope,
         input.requestId,
         inputHash,
+        backend,
         input.command,
         input.cwd ?? null,
         input.port ?? null,
@@ -257,6 +259,15 @@ export class ComputerProcessInventory {
       );
       return { process: this.#require(id), created: true };
     });
+  }
+  /** The backend selected at admission, retained across reconnects and restarts. */
+  backend(id: string): string | undefined {
+    return this.#storage.sql
+      .exec<{ backend: string }>(
+        "SELECT backend FROM computer_processes WHERE id = ?",
+        id,
+      )
+      .toArray()[0]?.backend;
   }
   exited(
     id: ComputerProcessId,
