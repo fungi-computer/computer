@@ -1,6 +1,6 @@
 {
   "name": "@fungi.computer/computer",
-  "version": "0.8.2",
+  "version": "0.8.3",
   "author": "Levi <levi@technomancy.dev>",
   "description": "Cloudflare Computer host for one durable Fungi Computer",
   "type": "module",
@@ -96,7 +96,7 @@
     "tsx": "4.23.12",
     "typescript": "5.9.3",
     "uuid": "11.1.1",
-    "wrangler": "4.156.2"
+    "wrangler": "4.159.0"
   },
   "botanical": {
     "role": "runtime",
