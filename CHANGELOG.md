@@ -1,5 +1,13 @@
 # @fungi.computer/computer
 
+## 0.8.6
+
+### Patch Changes
+
+- Changes since 0.8.5:
+
+  - fix(computer): learn a Computer's name from its first named call
+
 ## 0.8.5
 
 ### Patch Changes

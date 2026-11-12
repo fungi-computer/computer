@@ -41,6 +41,29 @@ export function computerName(
   return wokenAs ?? storedComputerName(sql);
 }
 
+/**
+ * Learn the name of a Computer no named wake has reached, from names its host
+ * already knows. A candidate is accepted only when the Computer's own
+ * namespace derives this object's id from it; anything else is refused and
+ * never stored. Call it only where recording is wanted, never after an
+ * erasure that must stay erased.
+ */
+export function learnComputerName<Id extends { equals(other: Id): boolean }>(
+  sql: WatchdogSqliteOwner["sql"],
+  id: Id,
+  namespace: Readonly<{ idFromName(name: string): Id }> | undefined,
+  candidates: readonly string[],
+): string | undefined {
+  const known = storedComputerName(sql);
+  if (known !== undefined || namespace === undefined) return known;
+  const name = candidates.find((candidate) =>
+    id.equals(namespace.idFromName(candidate)),
+  );
+  if (name === undefined) return undefined;
+  recordComputerName(sql, name);
+  return name;
+}
+
 function storedComputerName(
   sql: WatchdogSqliteOwner["sql"],
 ): string | undefined {

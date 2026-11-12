@@ -2,7 +2,11 @@ import { boundExecStream } from "./exec-output.js";
 export type { WorkspaceRuntimeResultOptions } from "@fungi.computer/cloudflare-computer";
 export { createLocalBackendReplayStore } from "./local-backend-replay.js";
 import { computerInternetAccess } from "./internet-access.js";
-import { computerName, recordComputerName } from "./computer-name.js";
+import {
+  computerName,
+  learnComputerName,
+  recordComputerName,
+} from "./computer-name.js";
 import {
   getWorkspace,
   SQLiteWorkspaceProvider,
@@ -336,6 +340,8 @@ export type ComputerEnv = OnBoxVmEnv &
     }) => Fetcher;
     /** Platform kill switch for container-backed Computer operations. */
     HOSTED_COMPUTERS?: string;
+    /** This Computer's own namespace; derives and verifies its object id. */
+    COMPUTER?: Readonly<{ idFromName(name: string): DurableObjectId }>;
     LOADER?: NonNullable<WorkerShellBackendOptions["loader"]>;
   }>;
 
@@ -423,7 +429,21 @@ class ContainerComputer extends ContainerComputerBase {
    * name-addressed wake has reached this Computer yet.
    */
   protected computerName(): string | undefined {
-    return computerName(this.state.storage.sql, this.state.id.name);
+    const known = computerName(this.state.storage.sql, this.state.id.name);
+    if (known !== undefined) return known;
+    // An object that predates the record learns its name from the names its
+    // host already knows, verified against this object's id.
+    return learnComputerName(
+      this.state.storage.sql,
+      this.state.id,
+      this.bindings.COMPUTER,
+      this.nameCandidates(),
+    );
+  }
+
+  /** Names this host knows this Computer may have; each is verified, not trusted. */
+  protected nameCandidates(): readonly string[] {
+    return [];
   }
 
   public override getWorkspaceContainer() {
