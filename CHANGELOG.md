@@ -1,5 +1,13 @@
 # @fungi.computer/computer
 
+## 0.8.4
+
+### Patch Changes
+
+- Changes since 0.8.3:
+
+  - fix(computer): install global npm and pnpm tools into the persistent home
+
 ## 0.8.3
 
 ### Patch Changes

@@ -135,6 +135,27 @@ async function runProof() {
   );
   await until(first, "PRIVILEGE_DENIED");
   assert.ok(!first.text.includes("PRIVILEGE_GAINED"));
+  // Global installs land in the user-owned home, not the root-owned image
+  // prefix. The login shell and a non-interactive `bash -c` (the agent path:
+  // every child of computerd or the terminal inherits the same environment)
+  // must both install and run a package, and the image's own pnpm must stay.
+  type(
+    first,
+    "npm install -g --no-fund --no-audit cowsay >/dev/null 2>&1 && cowsay login_$((6*7)); " +
+      "bash -c 'npm install -g --no-fund --no-audit cowsay >/dev/null 2>&1 && cowsay agent_$((6*8))'; " +
+      "echo PREFIX_$(npm prefix -g | tr / _) PNPM_$(command -v pnpm | tr / _) HOMEPNPM_$(echo $PNPM_HOME | tr / _)\n",
+  );
+  await until(first, "login_42");
+  await until(first, "agent_48");
+  await until(first, "PREFIX__workspace_.npm-global");
+  assert.ok(first.text.includes("PNPM__usr_local_bin_pnpm"));
+  assert.ok(first.text.includes("HOMEPNPM__workspace_.local_share_pnpm"));
+  type(
+    first,
+    "pnpm add -g cowsay >/dev/null 2>&1; echo PNPMGLOBAL_$?; test -x $PNPM_HOME/bin/cowsay && echo PNPMBIN_$((7*8))\n",
+  );
+  await until(first, "PNPMGLOBAL_0");
+  await until(first, "PNPMBIN_56");
   type(first, "git init -q -b juice; touch demo.txt; false\n");
   await until(first, "✗ 1");
   assert.ok(first.text.includes("git:(juice)"));

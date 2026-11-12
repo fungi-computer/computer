@@ -33,3 +33,7 @@ proof checks real cells at wide and narrow widths, connection ordering, retries
 and theme replay. Computerd command execution is separate and receives no
 welcome bytes. Local image proof checks the prompt and absence of art/hints on
 an interactive PTY, plus quiet non-interactive startup.
+
+`global-tools.sh` restores the user-owned npm and pnpm global folders on PATH
+for login shells (Debian's `/etc/profile` resets PATH); `computer-start.sh` sets
+`NPM_CONFIG_PREFIX` and `PNPM_HOME` for every Computer process.

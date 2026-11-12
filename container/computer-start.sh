@@ -21,4 +21,13 @@ chown "$uid:$uid" /workspace
 ulimit -Su "$pids_max"
 ulimit -Hu "$pids_max"
 export HOME=/workspace
+# The image's npm and pnpm prefixes are root-owned. Global installs go into
+# user-owned folders in the persistent home; npm and pnpm create them on first
+# use as this UID. Every Computer process (computerd exec, terminal) inherits
+# this environment. terminal-assets/global-tools.sh (sourced from
+# /etc/profile.d) restores the PATH entries for login shells, because Debian's
+# /etc/profile resets PATH.
+export NPM_CONFIG_PREFIX="$HOME/.npm-global"
+export PNPM_HOME="$HOME/.local/share/pnpm"
+export PATH="$NPM_CONFIG_PREFIX/bin:$PNPM_HOME/bin:$PATH"
 exec node /opt/fungi/computer-init.mjs

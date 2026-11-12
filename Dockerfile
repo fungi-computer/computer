@@ -60,10 +60,10 @@ COPY --from=terminal /opt/fungi/node_modules /opt/fungi/node_modules
 COPY container/runtime-privileges.mjs /opt/fungi/
 COPY --from=terminal /opt/fungi/runtime-privileges.node /opt/fungi/
 COPY container/package.json container/computer-init.mjs container/computer-start.sh container/resource-bounds.mjs container/terminal-server.mjs container/terminal-runtime.mjs container/terminal-protocol.mjs /opt/fungi/
-COPY container/terminal-assets/bashrc container/terminal-assets/git-prompt.sh /opt/fungi/terminal-assets/
+COPY container/terminal-assets/bashrc container/terminal-assets/git-prompt.sh container/terminal-assets/global-tools.sh /opt/fungi/terminal-assets/
 RUN chmod -R a+rX /opt/fungi \
   && printf '\n. /opt/fungi/terminal-assets/bashrc\n' >> /etc/bash.bashrc \
-  && printf '. /opt/fungi/terminal-assets/bashrc\n' > /etc/profile.d/fungi-terminal.sh
+  && printf '. /opt/fungi/terminal-assets/global-tools.sh\n. /opt/fungi/terminal-assets/bashrc\n' > /etc/profile.d/fungi-terminal.sh
 
 # No customer process can invoke a setuid/setgid helper, including fusermount.
 # FUSE is mounted while init is root, before either runtime listener opens.
