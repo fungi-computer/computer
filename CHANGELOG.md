@@ -1,5 +1,14 @@
 # @fungi.computer/computer
 
+## 0.8.5
+
+### Patch Changes
+
+- Changes since 0.8.4:
+
+  - fix(hub): read a hosted Computer's name from storage, not the wake
+  - fix(computer): keep a Computer's name when a redeploy wakes it by object id
+
 ## 0.8.4
 
 ### Patch Changes

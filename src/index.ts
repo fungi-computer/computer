@@ -2,6 +2,7 @@ import { boundExecStream } from "./exec-output.js";
 export type { WorkspaceRuntimeResultOptions } from "@fungi.computer/cloudflare-computer";
 export { createLocalBackendReplayStore } from "./local-backend-replay.js";
 import { computerInternetAccess } from "./internet-access.js";
+import { computerName, recordComputerName } from "./computer-name.js";
 import {
   getWorkspace,
   SQLiteWorkspaceProvider,
@@ -401,6 +402,8 @@ class ContainerComputer extends ContainerComputerBase {
 
   constructor(ctx: DurableObjectState, env: ComputerEnv) {
     super(ctx, env);
+    if (ctx.id.name !== undefined)
+      recordComputerName(ctx.storage.sql, ctx.id.name);
     if (
       ctx.container === undefined ||
       hostedComputerContainersPaused(env.HOSTED_COMPUTERS)
@@ -412,6 +415,15 @@ class ContainerComputer extends ContainerComputerBase {
         computerKeepAwake(ctx.storage.sql),
       ),
     );
+  }
+
+  /**
+   * This Computer's name, from storage: an instance first woken by object id
+   * has no `ctx.id.name` for its whole life. Undefined only when no
+   * name-addressed wake has reached this Computer yet.
+   */
+  protected computerName(): string | undefined {
+    return computerName(this.state.storage.sql, this.state.id.name);
   }
 
   public override getWorkspaceContainer() {
@@ -464,7 +476,7 @@ class ContainerComputer extends ContainerComputerBase {
     );
     if (
       backend === undefined ||
-      computerName !== this.state.id.name ||
+      computerName !== this.computerName() ||
       !(await verifyLocalBackendDial(
         request,
         computerName,
@@ -2043,7 +2055,7 @@ export class ComputerDO extends ContainerComputer implements ComputerFilesRpc {
   /** Host-owned display labels only; never credentials or provider URLs. */
   protected terminalDisplayEnvironment(): Promise<Record<string, string>> {
     return Promise.resolve({
-      FUNGI_COMPUTER_NAME: this.state.id.name ?? "Computer",
+      FUNGI_COMPUTER_NAME: this.computerName() ?? "Computer",
     });
   }
 
@@ -2092,6 +2104,7 @@ export class ComputerDO extends ContainerComputer implements ComputerFilesRpc {
 // Runtime backends reach the authoritative Workspace through these loopback
 // entrypoints. The consuming Worker must re-export both from its main module.
 export { WorkspaceProxy, WorkspaceServiceProxy };
+export { computerName } from "./computer-name.js";
 export {
   OnBoxVmContainerHost,
   OnBoxVmTimeoutError,
