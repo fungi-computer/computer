@@ -1,5 +1,13 @@
 # @fungi.computer/computer
 
+## 0.8.8
+
+### Patch Changes
+
+- Changes since 0.8.7:
+
+  - fix(hub): claim a Computer's name on every named call to it
+
 ## 0.8.7
 
 ### Patch Changes

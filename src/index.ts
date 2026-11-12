@@ -2138,7 +2138,7 @@ export class ComputerDO extends ContainerComputer implements ComputerFilesRpc {
 // Runtime backends reach the authoritative Workspace through these loopback
 // entrypoints. The consuming Worker must re-export both from its main module.
 export { WorkspaceProxy, WorkspaceServiceProxy };
-export { computerName } from "./computer-name.js";
+export { computerName, learnComputerName } from "./computer-name.js";
 export {
   OnBoxVmContainerHost,
   OnBoxVmTimeoutError,
