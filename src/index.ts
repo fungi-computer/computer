@@ -441,6 +441,20 @@ class ContainerComputer extends ContainerComputerBase {
     );
   }
 
+  /**
+   * Learn this Computer's name from a call's own claim of it (a grant's
+   * computerId). The namespace must derive this object's id from the claim,
+   * or it is refused and never stored.
+   */
+  protected claimComputerName(claimed: string): void {
+    learnComputerName(
+      this.state.storage.sql,
+      this.state.id,
+      this.bindings.COMPUTER,
+      [claimed],
+    );
+  }
+
   /** Names this host knows this Computer may have; each is verified, not trusted. */
   protected nameCandidates(): readonly string[] {
     return [];

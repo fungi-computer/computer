@@ -1,5 +1,13 @@
 # @fungi.computer/computer
 
+## 0.8.7
+
+### Patch Changes
+
+- Changes since 0.8.6:
+
+  - fix(oyster): learn a fleet Computer's name from its first verified grant
+
 ## 0.8.6
 
 ### Patch Changes
