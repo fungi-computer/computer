@@ -678,6 +678,7 @@ function idleFleet(
     : { kind: "platform-container" };
   const runtime = { running: true, runtimeId: "runtime-one", exit: null };
   const destroyed = [];
+  const slept = [];
   const stop = async (reason) => {
     await beforeStop();
     destroyed.push(reason);
@@ -693,6 +694,7 @@ function idleFleet(
     alarm: { waitUntil: () => undefined },
     computerId: "sleeper",
     backend: {
+      endedByIdleSleep: (backendId) => slept.push(backendId),
       state: {
         id: { toString: () => "sleeper" },
         container: {
@@ -718,7 +720,16 @@ function idleFleet(
   });
   const interval = () =>
     fleet.usage.pending().find((row) => row.runtimeId === "runtime-one");
-  return { clock, database, backing, runtime, destroyed, fleet, interval };
+  return {
+    clock,
+    database,
+    backing,
+    runtime,
+    destroyed,
+    slept,
+    fleet,
+    interval,
+  };
 }
 
 for (const vm of [false, true]) {
@@ -781,11 +792,8 @@ for (const vm of [false, true]) {
 
   test(`${name} sleeps after the idle window and is metered only to its last activity`, async (t) => {
     const { FleetLifecycle } = await import("../dist/fleet/index.js");
-    const { clock, database, backing, destroyed, fleet, interval } = idleFleet(
-      t,
-      FleetLifecycle,
-      { vm },
-    );
+    const { clock, database, backing, destroyed, slept, fleet, interval } =
+      idleFleet(t, FleetLifecycle, { vm });
     try {
       const startedAt = clock.now;
       clock.now += 2 * minute;
@@ -802,6 +810,8 @@ for (const vm of [false, true]) {
       clock.now = lastActivity + sleepWindow;
       await fleet.observe();
       assert.equal(destroyed.length, 1);
+      // The process record is told which backend slept, once, after the stop.
+      assert.deepEqual(slept, [vm ? "vm-host-one" : "container"]);
       assert.deepEqual(interval(), {
         runtimeId: "runtime-one",
         backing,

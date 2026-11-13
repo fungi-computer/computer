@@ -789,6 +789,11 @@ export class ComputerDO extends ContainerComputer implements ComputerFilesRpc {
     void this.#executions;
   }
 
+  /** The fleet slept this backend after it sat idle; its running commands ended with it. */
+  protected endedByIdleSleep(backendId: string): void {
+    this.#processes.endedByIdleSleep(backendId);
+  }
+
   /** Host-admitted settings write; egress reads the current durable value. */
   internetAccess(enabled?: boolean): boolean {
     return computerInternetAccess(this.state.storage.sql, enabled);

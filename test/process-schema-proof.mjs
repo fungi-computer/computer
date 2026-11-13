@@ -25,6 +25,7 @@ const processList = z.strictObject({
       sync: z.enum(["synced", "pending", "unknown"]),
       startedAt: z.number().int(),
       endedAt: z.number().int().nullable(),
+      endedReason: null,
     }),
   ),
 });

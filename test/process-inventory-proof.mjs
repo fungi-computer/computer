@@ -287,6 +287,54 @@ test("identity survives reconstruction and exits are recorded once", () => {
   assert.equal(reopened.get(id)?.state, "exited", "exited rows stay");
 });
 
+test("an idle sleep ends only that backend's running commands, with its reason", () => {
+  const storage = sqliteStorage();
+  const inventory = new ComputerProcessInventory(storage, clock());
+  const start = (backend, command, port) => {
+    const input = {
+      requestScope: "owner:fixture",
+      requestId: mintComputerRequestId(),
+      command,
+    };
+    if (port !== undefined) input.port = port;
+    return inventory.admit(backend, input, command, accept).process;
+  };
+  const sleeping = start("container", "pnpm dev", 3000);
+  const finished = start("container", "ls");
+  inventory.exited(finished.id, 0);
+  const elsewhere = start("local-abcdefghijklmnop", "make watch");
+
+  inventory.endedByIdleSleep("container");
+
+  assert.deepEqual(
+    {
+      state: inventory.get(sleeping.id)?.state,
+      exitCode: inventory.get(sleeping.id)?.exitCode,
+      endedReason: inventory.get(sleeping.id)?.endedReason,
+    },
+    { state: "exited", exitCode: null, endedReason: "idle-sleep" },
+  );
+  assert.notEqual(inventory.get(sleeping.id)?.endedAt, null);
+  assert.equal(
+    inventory.get(finished.id)?.endedReason,
+    null,
+    "a command that already exited keeps its own exit",
+  );
+  assert.equal(inventory.get(finished.id)?.exitCode, 0);
+  assert.equal(
+    inventory.get(elsewhere.id)?.state,
+    "running",
+    "another backend did not sleep",
+  );
+  assert.equal(
+    inventory.get(sleeping.id) && inventory.exited(sleeping.id, 9).exitCode,
+    null,
+    "a later observation cannot rewrite the recorded sleep",
+  );
+  // The sleep freed the port, so a new command may take it.
+  assert.doesNotThrow(() => start("container", "pnpm dev again", 3000));
+});
+
 test("a process is unknown-synced unless its drained exit reported real pull evidence", () => {
   const inventory = new ComputerProcessInventory(sqliteStorage(), clock());
   const running = inventory.admit(

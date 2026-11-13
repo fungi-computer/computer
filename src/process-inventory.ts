@@ -41,6 +41,7 @@ type ProcessRow = {
   sync: string;
   started_at: number;
   ended_at: number | null;
+  ended_reason: string | null;
   log_tail: string;
   log_truncated: number;
 };
@@ -55,6 +56,7 @@ function toProcess(row: ProcessRow): ComputerProcess {
     sync: row.sync,
     startedAt: row.started_at,
     endedAt: row.ended_at,
+    endedReason: row.ended_reason,
   });
 }
 
@@ -67,7 +69,7 @@ function toProcess(row: ProcessRow): ComputerProcess {
  * storage (confirmed in workerd; node:sqlite does not enforce the same
  * sandbox, so a unit test against it alone would hide this).
  */
-const processSchemaVersion = 4;
+const processSchemaVersion = 5;
 
 /** The retained last output lines of one process. */
 export type ProcessLogSnapshot = Readonly<{
@@ -150,7 +152,7 @@ export class ComputerProcessInventory {
         );
       }
       storage.sql.exec(
-        "CREATE TABLE IF NOT EXISTS computer_processes (id TEXT PRIMARY KEY, request_scope TEXT NOT NULL, request_id TEXT NOT NULL, input_hash TEXT NOT NULL, backend TEXT NOT NULL, command TEXT NOT NULL, cwd TEXT, port INTEGER, state TEXT NOT NULL CHECK (state IN ('running','exited')), exit_code INTEGER, sync TEXT NOT NULL DEFAULT 'unknown' CHECK (sync IN ('synced','pending','unknown')), started_at INTEGER NOT NULL, ended_at INTEGER, log_tail TEXT NOT NULL DEFAULT '', log_truncated INTEGER NOT NULL DEFAULT 0, CHECK ((state = 'running') = (ended_at IS NULL)), UNIQUE(request_scope, request_id)) STRICT",
+        "CREATE TABLE IF NOT EXISTS computer_processes (id TEXT PRIMARY KEY, request_scope TEXT NOT NULL, request_id TEXT NOT NULL, input_hash TEXT NOT NULL, backend TEXT NOT NULL, command TEXT NOT NULL, cwd TEXT, port INTEGER, state TEXT NOT NULL CHECK (state IN ('running','exited')), exit_code INTEGER, sync TEXT NOT NULL DEFAULT 'unknown' CHECK (sync IN ('synced','pending','unknown')), started_at INTEGER NOT NULL, ended_at INTEGER, ended_reason TEXT CHECK (ended_reason IN ('idle-sleep')), log_tail TEXT NOT NULL DEFAULT '', log_truncated INTEGER NOT NULL DEFAULT 0, CHECK ((state = 'running') = (ended_at IS NULL)), UNIQUE(request_scope, request_id)) STRICT",
       );
       storage.sql.exec(
         "CREATE TABLE IF NOT EXISTS computer_exposed_ports (port INTEGER PRIMARY KEY CHECK (port BETWEEN 1 AND 65535), process_id TEXT) STRICT",
@@ -287,6 +289,32 @@ export class ComputerProcessInventory {
         id,
       );
       return this.#require(id);
+    });
+  }
+  /**
+   * The Computer slept after sitting idle, so every command still running on
+   * that backend stopped with it. Record them as ended by idle sleep, in one
+   * transaction, instead of leaving a later liveness probe to report an
+   * unexplained exit.
+   */
+  endedByIdleSleep(backend: string): void {
+    this.#storage.transactionSync(() => {
+      const ids = this.#storage.sql
+        .exec<{ id: string }>(
+          "SELECT id FROM computer_processes WHERE backend = ? AND state = 'running'",
+          backend,
+        )
+        .toArray();
+      this.#storage.sql.exec(
+        "UPDATE computer_processes SET state = 'exited', exit_code = NULL, sync = 'unknown', ended_at = ?, ended_reason = 'idle-sleep' WHERE backend = ? AND state = 'running'",
+        this.#now(),
+        backend,
+      );
+      for (const { id } of ids)
+        this.#storage.sql.exec(
+          "DELETE FROM computer_exposed_ports WHERE process_id = ?",
+          id,
+        );
     });
   }
   /** Replace the retained output tail of one process, if its record is still kept. */

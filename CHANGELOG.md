@@ -1,5 +1,21 @@
 # @fungi.computer/computer
 
+## 0.9.0
+
+### Minor Changes
+
+- Changes since 0.8.8:
+
+  - fix(computer): drop a replay table without a backend column instead of
+    upgrading it
+  - fix(computer): give each local backend its own dial-replay capacity share
+  - feat(computer): say a command ended because the Computer went to sleep
+
+### Patch Changes
+
+- Updated dependencies
+  - @fungi.computer/computer-contract@0.2.0
+
 ## 0.8.8
 
 ### Patch Changes

@@ -57,6 +57,8 @@ export type FleetLifecyclePorts = Readonly<{
     describeBackends: () => AttachedBackendView[];
     requireHostedRoute: () => { backing: HostedBacking; id: string };
     containerRunning: (backing: HostedBacking) => Promise<boolean>;
+    /** The Computer's process record learns that this backend went to sleep. */
+    endedByIdleSleep: (backendId: string) => void;
     vmQueuePosition: (hostId: string) => Promise<number | null>;
   }>;
 }>;
@@ -478,6 +480,8 @@ export class FleetLifecycle {
         this.diagnostic("computer_idle_stop_failed", "idle_stop", cause);
         return { running: true, at: this.billedThrough(runtimeId, now) };
       }
+      // The sleep ended every command still running on this backend; say so.
+      this.ports.backend.endedByIdleSleep(attachedBackendId(backing));
       return { running: false, at: this.billedThrough(runtimeId, now) };
     }
     return { running, at: this.billedThrough(runtimeId, exitedAt) };

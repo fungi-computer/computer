@@ -163,7 +163,7 @@ export async function verifyLocalBackendDial(
       request.url,
       request.headers.get(seamHeader),
       null,
-      createLocalBackendReplayStore(owner),
+      createLocalBackendReplayStore(owner, attachedBackendId(backend)),
     );
     return true;
   } catch (cause) {

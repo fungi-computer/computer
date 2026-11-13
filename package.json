@@ -1,6 +1,6 @@
 {
   "name": "@fungi.computer/computer",
-  "version": "0.8.8",
+  "version": "0.9.0",
   "author": "Levi <levi@technomancy.dev>",
   "description": "Cloudflare Computer host for one durable Fungi Computer",
   "type": "module",
