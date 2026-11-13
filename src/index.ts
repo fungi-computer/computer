@@ -75,6 +75,9 @@ import {
   maximumFileBytes,
   mkdirInputSchema,
   mkdirOutputSchema,
+  moveInputSchema,
+  moveOutputSchema,
+  ComputerFileMoveError,
   readInputSchema,
   readBytesInputSchema,
   readOutputSchema,
@@ -251,6 +254,60 @@ async function mkdir(workspace: Workspace, input: ComputerValue) {
   const { path, recursive } = mkdirInputSchema.parse(input);
   await workspace.fs.mkdir(path, { recursive });
   return mkdirOutputSchema.parse({ path });
+}
+
+const isMissing = z.lazy(() => z.object({ code: z.literal("ENOENT") }));
+const isInvalid = z.lazy(() => z.object({ code: z.literal("EINVAL") }));
+
+/**
+ * Rename through the Workspace provider's native `rename`, which moves the
+ * inode under its new name, so a directory keeps its whole subtree and nothing
+ * is copied. The provider overwrites an existing destination, so refuse that
+ * first. Call inside one storage transaction: a refusal after
+ * `createParents` has made folders rolls them back.
+ */
+function move(workspace: Workspace, input: ComputerValue) {
+  const { from, to, createParents } = moveInputSchema.parse(input);
+  const provider = new SQLiteWorkspaceProvider(workspace.fs.db);
+  const lstat = (path: string) => {
+    try {
+      return provider.lstatSync(path);
+    } catch (cause) {
+      if (isMissing.safeParse(cause).success) return null;
+      throw cause;
+    }
+  };
+  const source = lstat(from);
+  if (source === null)
+    throw new ComputerFileMoveError("missing", `no such path: ${from}`);
+  if (source.isDirectory() && (to === from || to.startsWith(`${from}/`)))
+    throw new ComputerFileMoveError(
+      "invalid",
+      `a directory cannot move into itself: ${from}`,
+    );
+  if (lstat(to) !== null)
+    throw new ComputerFileMoveError("exists", `already exists: ${to}`);
+  const parent = to.slice(0, Math.max(to.lastIndexOf("/"), 1));
+  if (createParents) provider.mkdirSync(parent, { recursive: true });
+  try {
+    provider.renameSync(from, to);
+  } catch (cause) {
+    // The provider's own checks still decide what the text above cannot: a
+    // missing parent, and a destination that resolves inside the source
+    // through a symlink.
+    if (isMissing.safeParse(cause).success)
+      throw new ComputerFileMoveError(
+        "missing",
+        `parent directory missing: ${to}`,
+      );
+    if (isInvalid.safeParse(cause).success)
+      throw new ComputerFileMoveError(
+        "invalid",
+        `cannot move ${from} to ${to}`,
+      );
+    throw cause;
+  }
+  return moveOutputSchema.parse({ from, to });
 }
 
 async function write(workspace: Workspace, input: ComputerValue) {
@@ -1454,6 +1511,14 @@ export class ComputerDO extends ContainerComputer implements ComputerFilesRpc {
       }
       case "write": {
         const result = await write(workspace, input);
+        await this.#syncRunningHosted("push");
+        return result;
+      }
+      case "move": {
+        await this.#syncRunningHosted("pull");
+        const result = this.state.storage.transactionSync(() =>
+          move(workspace, input),
+        );
         await this.#syncRunningHosted("push");
         return result;
       }

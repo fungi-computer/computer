@@ -1,5 +1,19 @@
 # @fungi.computer/computer
 
+## 0.10.0
+
+### Minor Changes
+
+- Changes since 0.9.0:
+
+  - feat(computer): add the files.move operation
+
+### Patch Changes
+
+- Updated dependencies
+  - @fungi.computer/computer-contract@0.3.0
+  - @fungi.computer/knapsack@0.4.10
+
 ## 0.9.0
 
 ### Minor Changes
