@@ -3,6 +3,7 @@ import type {
   WorkspaceRef,
 } from "@fungi.computer/cloudflare-computer/backends/container";
 import type {
+  ComputerSize,
   ContainerRuntimeStart,
   HostedBacking,
 } from "./computer-backends.js";
@@ -15,15 +16,18 @@ import type {
 export class MeteredContainerHost implements IWorkspaceContainerAPI {
   readonly #host: IWorkspaceContainerAPI;
   readonly #backing: HostedBacking;
+  readonly #size: () => ComputerSize;
   readonly #started: (start: ContainerRuntimeStart) => void;
 
   constructor(
     host: IWorkspaceContainerAPI,
     backing: HostedBacking,
+    size: () => ComputerSize,
     started: (start: ContainerRuntimeStart) => void,
   ) {
     this.#host = host;
     this.#backing = backing;
+    this.#size = size;
     this.#started = started;
   }
 
@@ -32,6 +36,7 @@ export class MeteredContainerHost implements IWorkspaceContainerAPI {
     this.#started({
       runtimeId: runtime.runtimeId,
       backing: this.#backing,
+      size: this.#size(),
       startedAt: Date.now(),
     });
     return runtime;

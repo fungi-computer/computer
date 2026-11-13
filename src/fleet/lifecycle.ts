@@ -371,6 +371,7 @@ export class FleetLifecycle {
           this.containerRuntimeStarted({
             runtimeId: current.runtimeId,
             backing,
+            size: row.size,
             startedAt: Date.now(),
           });
       }
@@ -425,7 +426,7 @@ export class FleetLifecycle {
           .onBoxVmHost(backing.hostId)
           .state();
         if (!current.running || current.runtimeId !== row.runtimeId) continue;
-        this.usage.requestRecycle(row.runtimeId, backing, Date.now());
+        this.usage.requestRecycle(row.runtimeId, backing, row.size, Date.now());
         await this.armRuntimeWatch(Date.now() + vmRecycleQuietMs);
         const started = await this.ports.backend
           .hostedContainerHost(backing)

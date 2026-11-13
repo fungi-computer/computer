@@ -6,6 +6,7 @@ import {
 } from "@fungi.computer/computer-contract";
 import {
   attachedBackendId,
+  computerSizeSchema,
   hostedBackingSchema,
   localBackendSchema,
   type AttachedBackend,
@@ -153,6 +154,7 @@ const factIdentity = {
 export const computerUsageIntervalSchema = z.strictObject({
   runtimeId: z.string().min(1).max(128),
   backing: hostedBackingSchema,
+  size: computerSizeSchema,
   startedAt: z.number().int().nonnegative(),
   /** The last observed instant; final once `ended` is true. */
   observedAt: z.number().int().nonnegative(),
@@ -164,6 +166,7 @@ export type ComputerUsageInterval = Readonly<{
   backing:
     | Readonly<{ kind: "platform-container" }>
     | Readonly<{ kind: "on-box-vm"; hostId: string }>;
+  size: "small" | "default" | "large";
   startedAt: number;
   observedAt: number;
   ended: boolean;

@@ -14,6 +14,16 @@ const hostIdSchema = z.lazy(() =>
 );
 const labelSchema = z.lazy(() => z.string().trim().min(1).max(256));
 
+/**
+ * A Computer's size, chosen at creation. It selects the on-box VM's vCPUs and
+ * memory and the retail price. Platform containers have one fixed instance
+ * type and ignore it. The resources behind each name live in
+ * `container/resource-bounds.mjs`, which the VM host also reads.
+ */
+export const computerSizeSchema = z.enum(["small", "default", "large"]);
+export type ComputerSize = z.infer<typeof computerSizeSchema>;
+export const defaultComputerSize: ComputerSize = "default";
+
 /** A backend the platform runs: a Cloudflare container or an on-box VM. */
 export const hostedBackingSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("platform-container") }),
@@ -163,5 +173,6 @@ export function routeComputerBackend(
 export type ContainerRuntimeStart = Readonly<{
   runtimeId: string;
   backing: HostedBacking;
+  size: ComputerSize;
   startedAt: number;
 }>;

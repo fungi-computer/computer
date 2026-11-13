@@ -1,7 +1,9 @@
 import { z } from "zod";
 import type { WatchdogSqliteOwner } from "@fungi.computer/watchdog";
 import {
+  computerSizeSchema,
   hostedBackingSchema,
+  type ComputerSize,
   type ContainerRuntimeStart,
   type HostedBacking,
 } from "../computer-backends.js";
@@ -26,7 +28,7 @@ export class ComputerRuntimeUsage {
 
   ensure(): void {
     this.sql.exec(
-      "CREATE TABLE IF NOT EXISTS hub_computer_runtime_usage (runtime_id TEXT PRIMARY KEY, backing TEXT NOT NULL, started_at INTEGER NOT NULL, observed_at INTEGER NOT NULL, ended INTEGER NOT NULL CHECK (ended IN (0,1)), delivered_at INTEGER NOT NULL DEFAULT -1) STRICT",
+      "CREATE TABLE IF NOT EXISTS hub_computer_runtime_usage (runtime_id TEXT PRIMARY KEY, backing TEXT NOT NULL, size TEXT NOT NULL CHECK (size IN ('small','default','large')), started_at INTEGER NOT NULL, observed_at INTEGER NOT NULL, ended INTEGER NOT NULL CHECK (ended IN (0,1)), delivered_at INTEGER NOT NULL DEFAULT -1) STRICT",
     );
     this.sql.exec(
       "CREATE TABLE IF NOT EXISTS hub_computer_runtime_activity (runtime_id TEXT PRIMARY KEY, last_activity_at INTEGER NOT NULL) STRICT",
@@ -36,9 +38,10 @@ export class ComputerRuntimeUsage {
   started(start: ContainerRuntimeStart): void {
     this.ensure();
     this.sql.exec(
-      "INSERT OR IGNORE INTO hub_computer_runtime_usage (runtime_id, backing, started_at, observed_at, ended) VALUES (?,?,?,?,0)",
+      "INSERT OR IGNORE INTO hub_computer_runtime_usage (runtime_id, backing, size, started_at, observed_at, ended) VALUES (?,?,?,?,?,0)",
       start.runtimeId,
       JSON.stringify(start.backing),
+      start.size,
       start.startedAt,
       start.startedAt,
     );
@@ -122,10 +125,11 @@ export class ComputerRuntimeUsage {
   recycleCandidates(before: number): {
     runtimeId: string;
     backing: HostedBacking;
+    size: ComputerSize;
   }[] {
     return this.sql
       .exec(
-        "SELECT runtime_id,backing FROM hub_computer_runtime_usage WHERE ended=0 AND started_at<=?",
+        "SELECT runtime_id,backing,size FROM hub_computer_runtime_usage WHERE ended=0 AND started_at<=?",
         before,
       )
       .toArray()
@@ -134,24 +138,26 @@ export class ComputerRuntimeUsage {
         backing: hostedBackingSchema.parse(
           JSON.parse(z.string().parse(row.backing)),
         ),
+        size: computerSizeSchema.parse(row.size),
       }));
   }
 
   private ensureRecycle(): void {
     this.sql.exec(
-      "CREATE TABLE IF NOT EXISTS hub_computer_vm_recycle (runtime_id TEXT PRIMARY KEY, backing TEXT NOT NULL, requested_at INTEGER NOT NULL) STRICT",
+      "CREATE TABLE IF NOT EXISTS hub_computer_vm_recycle (runtime_id TEXT PRIMARY KEY, backing TEXT NOT NULL, size TEXT NOT NULL CHECK (size IN ('small','default','large')), requested_at INTEGER NOT NULL) STRICT",
     );
   }
 
   pendingRecycles(): {
     runtimeId: string;
     backing: Extract<HostedBacking, { kind: "on-box-vm" }>;
+    size: ComputerSize;
     requestedAt: number;
   }[] {
     this.ensureRecycle();
     return this.sql
       .exec(
-        "SELECT runtime_id,backing,requested_at FROM hub_computer_vm_recycle",
+        "SELECT runtime_id,backing,size,requested_at FROM hub_computer_vm_recycle",
       )
       .toArray()
       .map((row) => {
@@ -163,6 +169,7 @@ export class ComputerRuntimeUsage {
         return {
           runtimeId: z.string().parse(row.runtime_id),
           backing,
+          size: computerSizeSchema.parse(row.size),
           requestedAt: z.number().parse(row.requested_at),
         };
       });
@@ -171,13 +178,15 @@ export class ComputerRuntimeUsage {
   requestRecycle(
     runtimeId: string,
     backing: HostedBacking,
+    size: ComputerSize,
     requestedAt: number,
   ): void {
     this.ensureRecycle();
     this.sql.exec(
-      "INSERT INTO hub_computer_vm_recycle (runtime_id,backing,requested_at) VALUES (?,?,?)",
+      "INSERT INTO hub_computer_vm_recycle (runtime_id,backing,size,requested_at) VALUES (?,?,?,?)",
       runtimeId,
       JSON.stringify(backing),
+      size,
       requestedAt,
     );
   }
@@ -227,7 +236,7 @@ export class ComputerRuntimeUsage {
   pending(): ComputerUsageInterval[] {
     return this.sql
       .exec(
-        "SELECT runtime_id, backing, started_at, observed_at, ended FROM hub_computer_runtime_usage WHERE observed_at > delivered_at OR ended = 1 LIMIT 64",
+        "SELECT runtime_id, backing, size, started_at, observed_at, ended FROM hub_computer_runtime_usage WHERE observed_at > delivered_at OR ended = 1 LIMIT 64",
       )
       .toArray()
       .map((row) => ({
@@ -235,6 +244,7 @@ export class ComputerRuntimeUsage {
         backing: hostedBackingSchema.parse(
           JSON.parse(z.string().parse(row.backing)),
         ),
+        size: computerSizeSchema.parse(row.size),
         startedAt: z.number().parse(row.started_at),
         observedAt: z.number().parse(row.observed_at),
         ended: row.ended === 1,

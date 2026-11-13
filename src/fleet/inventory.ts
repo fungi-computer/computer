@@ -3,6 +3,10 @@ import { words } from "@fungi.computer/cairn";
 import { defineIdFamily } from "@fungi.computer/cairn/id";
 import { z } from "zod";
 import {
+  computerSizeSchema,
+  defaultComputerSize,
+} from "../computer-backends.js";
+import {
   ComputerInventoryError,
   type FleetActor,
   type ComputerCreateRequest,
@@ -21,6 +25,7 @@ const rowSchema = z.lazy(() =>
   z.strictObject({
     computer_id: z.string().min(1),
     name: z.string().min(1).max(256),
+    size: computerSizeSchema,
     actor_kind: z.string().min(1),
     actor_id: z.string().min(1).max(256),
     active: z.number().int().min(0).max(1),
@@ -40,7 +45,7 @@ const receiptSchema = z.lazy(() =>
 );
 
 const selectRow =
-  "SELECT computer_id,name,actor_kind,actor_id,active,created_at,updated_at FROM hub_team_computers";
+  "SELECT computer_id,name,size,actor_kind,actor_id,active,created_at,updated_at FROM hub_team_computers";
 
 function actorColumns(actor: FleetActor) {
   return { actorId: actor.id, actorKind: actor.kind };
@@ -64,7 +69,7 @@ export function createFleetInventory(
   const { sql } = options;
   const ensure = () => {
     sql.exec(
-      "CREATE TABLE IF NOT EXISTS hub_team_computers (computer_id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, actor_kind TEXT NOT NULL, actor_id TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)), created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL) STRICT",
+      "CREATE TABLE IF NOT EXISTS hub_team_computers (computer_id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, size TEXT NOT NULL CHECK (size IN ('small','default','large')), actor_kind TEXT NOT NULL, actor_id TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)), created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL) STRICT",
     );
     sql.exec(
       "CREATE TABLE IF NOT EXISTS hub_team_computer_create_receipts (request_id TEXT PRIMARY KEY, actor_kind TEXT NOT NULL, actor_id TEXT NOT NULL, requested_name TEXT, name TEXT NOT NULL, computer_id TEXT NOT NULL REFERENCES hub_team_computers(computer_id)) STRICT",
@@ -76,6 +81,7 @@ export function createFleetInventory(
     return {
       computerId: id.value,
       name: row.name,
+      size: row.size,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
@@ -168,6 +174,11 @@ export function createFleetInventory(
       if (stored.success && stored.data.active === 0)
         throw new ComputerInventoryError("request_conflict");
       if (
+        stored.success &&
+        stored.data.size !== (request.size ?? defaultComputerSize)
+      )
+        throw new ComputerInventoryError("request_conflict");
+      if (
         !stored.success ||
         stored.data.name !== receipt.data.name ||
         stored.data.actor_kind !== receipt.data.actor_kind ||
@@ -194,9 +205,10 @@ export function createFleetInventory(
       const now = Date.now();
       const columns = actorColumns(actor);
       sql.exec(
-        "INSERT INTO hub_team_computers (computer_id,name,actor_kind,actor_id,active,created_at,updated_at) VALUES (?,?,?,?,?,?,?)",
+        "INSERT INTO hub_team_computers (computer_id,name,size,actor_kind,actor_id,active,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)",
         computerId,
         name,
+        request.size ?? defaultComputerSize,
         columns.actorKind,
         columns.actorId,
         1,

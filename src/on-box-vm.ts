@@ -3,6 +3,7 @@ import type {
   WorkspaceRef,
 } from "@fungi.computer/cloudflare-computer/backends/container";
 import { z } from "zod";
+import { computerSizeSchema, type ComputerSize } from "./computer-backends.js";
 import * as Data from "effect/Data";
 import {
   SeamReplayPartitions,
@@ -168,6 +169,7 @@ const vmInventorySchema = z.array(
     id: z.string().regex(/^[0-9a-f]{64}$/),
     name: z.string(),
     lastActive: z.number().int().nonnegative(),
+    size: computerSizeSchema,
   }),
 );
 export type OnBoxVmInventory = z.infer<typeof vmInventorySchema>;
@@ -208,6 +210,7 @@ type VmRequestBody =
       env: Record<string, string>;
       enableInternet: boolean;
       sleepAfterMs: number;
+      size: ComputerSize;
     }>
   | Readonly<{ host: string; workspace: WorkspaceRef }>
   | Readonly<{ all: true; token: string; workspace: WorkspaceRef }>;
@@ -247,7 +250,18 @@ export class OnBoxVmContainerHost implements IWorkspaceContainerAPI {
   readonly #placement: OnBoxVmPlacement;
   readonly #env: OnBoxVmEnv;
   readonly #vmId: string;
-  constructor(placement: OnBoxVmPlacement, env: OnBoxVmEnv, vmId: string) {
+  readonly #size: (() => ComputerSize) | undefined;
+  /**
+   * `size` names the Computer's size at each boot; a host built only to read
+   * or stop VMs omits it and cannot boot one.
+   */
+  constructor(
+    placement: OnBoxVmPlacement,
+    env: OnBoxVmEnv,
+    vmId: string,
+    size?: () => ComputerSize,
+  ) {
+    this.#size = size;
     this.#placement = placement;
     this.#env = env;
     this.#vmId = z
@@ -291,10 +305,13 @@ export class OnBoxVmContainerHost implements IWorkspaceContainerAPI {
     env: Record<string, string>,
     enableInternet: boolean,
   ) {
+    if (this.#size === undefined)
+      throw new Error("This on-box VM host was built without a Computer size");
     const started = await this.#call(operation, vmStartSchema, {
       env,
       enableInternet,
       sleepAfterMs: vmHostSleepBackstopMs,
+      size: this.#size(),
     });
     return { runtimeId: started.runtimeId };
   }

@@ -1,5 +1,20 @@
 # @fungi.computer/computer
 
+## 0.11.0
+
+### Minor Changes
+
+- Changes since 0.10.0:
+
+  - feat(computer): weigh VM host admission by Computer size
+  - feat(computer): small, default and large Computers with a published hourly
+    price
+
+### Patch Changes
+
+- @fungi.computer/knapsack@0.4.11
+  - @fungi.computer/computer-contract@0.3.1
+
 ## 0.10.0
 
 ### Minor Changes

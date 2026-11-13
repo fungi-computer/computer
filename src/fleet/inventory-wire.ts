@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { computerSizeSchema, type ComputerSize } from "../computer-backends.js";
 
 /** Opaque host identity; the fleet does not interpret the actor kind. */
 export type FleetActor = Readonly<{ kind: string; id: string }>;
@@ -6,16 +7,20 @@ export type FleetActor = Readonly<{ kind: string; id: string }>;
 export type FleetComputer = Readonly<{
   computerId: string;
   name: string;
+  size: ComputerSize;
   createdAt: number;
   updatedAt: number;
 }>;
 /** A durable create receipt binds the complete request to its actor. */
 export const computerCreateRequestSchema = z.strictObject({
   name: z.string().min(1).max(256).optional(),
+  /** Omitted means `default`. */
+  size: computerSizeSchema.optional(),
   requestId: z.string().min(1).max(256),
 });
 export type ComputerCreateRequest = Readonly<{
   name?: string | undefined;
+  size?: ComputerSize | undefined;
   requestId: string;
 }>;
 /** Inventory pages retain stable ordering and a bounded response. */

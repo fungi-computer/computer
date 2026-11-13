@@ -38,6 +38,7 @@ test("usage facts keep their Computer and provenance through delivery acknowledg
     usage.started({
       runtimeId: "runtime-one",
       backing: { kind: "platform-container" },
+      size: "default",
       startedAt: 1_000,
     });
     usage.observe("runtime-one", { running: false, at: 2_000 });
@@ -49,6 +50,7 @@ test("usage facts keep their Computer and provenance through delivery acknowledg
         provenance: { actor: "computer-one" },
         runtimeId: "runtime-one",
         backing: { kind: "platform-container" },
+        size: "default",
         startedAt: 1_000,
         observedAt: 2_000,
         ended: true,
@@ -253,6 +255,7 @@ test("usage facts retain provenance and runtime interval identity for host settl
     provenance: { actor: "owner", via: "invocation-one" },
     runtimeId: "runtime-one",
     backing: { kind: "platform-container" },
+    size: "default",
     startedAt: 1_000,
     observedAt: 2_000,
     ended: false,
@@ -548,6 +551,7 @@ test("a recycling restart stays pending across stop readback until its late boot
     fleet.containerRuntimeStarted({
       runtimeId: "old",
       backing,
+      size: "default",
       startedAt: now,
     });
     await Promise.all(watches);
@@ -716,6 +720,7 @@ function idleFleet(
   fleet.containerRuntimeStarted({
     runtimeId: "runtime-one",
     backing,
+    size: "default",
     startedAt: clock.now,
   });
   const interval = () =>
@@ -767,6 +772,7 @@ for (const vm of [false, true]) {
         fleet.containerRuntimeStarted({
           runtimeId: runtime.runtimeId,
           backing,
+          size: "default",
           startedAt: clock.now,
         });
         return "command completed";
@@ -815,6 +821,7 @@ for (const vm of [false, true]) {
       assert.deepEqual(interval(), {
         runtimeId: "runtime-one",
         backing,
+        size: "default",
         startedAt,
         observedAt: lastActivity,
         ended: true,

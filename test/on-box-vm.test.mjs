@@ -119,16 +119,35 @@ test(
   },
 );
 
-test("a VM boots with vmd's sleep timer at its maximum, as a backstop to ComputerDO", async (t) => {
+test("a VM boots with vmd's sleep timer at its maximum and the Computer's size", async (t) => {
   const bodies = [];
   t.mock.method(globalThis, "fetch", async (_url, init) => {
     bodies.push(JSON.parse(new globalThis.TextDecoder().decode(init.body)));
     return globalThis.Response.json({ runtimeId: "runtime-one" });
   });
-  assert.deepEqual(await host.start({}, false), { runtimeId: "runtime-one" });
+  let size = "large";
+  const sized = new OnBoxVmContainerHost(
+    { hostId: "hel1", origin: "https://box.example" },
+    env,
+    "a".repeat(64),
+    () => size,
+  );
+  assert.deepEqual(await sized.start({}, false), { runtimeId: "runtime-one" });
+  size = "small";
+  assert.deepEqual(await sized.restart({}, false), {
+    runtimeId: "runtime-one",
+  });
   assert.deepEqual(bodies, [
-    { env: {}, enableInternet: false, sleepAfterMs: 86_400_000 },
+    { env: {}, enableInternet: false, sleepAfterMs: 86_400_000, size: "large" },
+    { env: {}, enableInternet: false, sleepAfterMs: 86_400_000, size: "small" },
   ]);
+});
+
+test("a host built to read and stop VMs cannot boot one", async (t) => {
+  t.mock.method(globalThis, "fetch", async () => {
+    throw new Error("a boot without a size must not reach the host");
+  });
+  await assert.rejects(host.start({}, false), /without a Computer size/);
 });
 
 function hostPair(hostId) {

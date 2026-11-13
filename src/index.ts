@@ -137,12 +137,14 @@ import {
 import { computerKeepAwake } from "./fleet/keep-awake.js";
 import {
   attachedBackendId,
+  defaultComputerSize,
   describeAttachedBackend,
   routeComputerBackend,
   type AttachedBackend,
   type AttachedBackendView,
   type BackendNeed,
   type BackendRoute,
+  type ComputerSize,
   type ContainerRuntimeStart,
   type HostedBacking,
   type LocalBackend,
@@ -588,6 +590,11 @@ class ContainerComputer extends ContainerComputerBase {
     return new Response(null, { status: 101, webSocket: client });
   }
 
+  /** This Computer's size, which the owner knows; the default until it says. */
+  protected computerSize(): ComputerSize {
+    return defaultComputerSize;
+  }
+
   /** A runtime of a hosted backend started; owners meter it. */
   protected containerRuntimeStarted(start: ContainerRuntimeStart): void {
     void start;
@@ -653,9 +660,14 @@ class ContainerComputer extends ContainerComputerBase {
       backing.kind === "platform-container"
         ? this.getWorkspaceContainer()
         : this.onBoxVmHost(backing.hostId);
-    return new MeteredContainerHost(host, backing, (start) => {
-      this.containerRuntimeStarted(start);
-    });
+    return new MeteredContainerHost(
+      host,
+      backing,
+      () => this.computerSize(),
+      (start) => {
+        this.containerRuntimeStarted(start);
+      },
+    );
   }
 
   /** The on-box VM host service for `hostId`, one per placement. */
@@ -683,6 +695,7 @@ class ContainerComputer extends ContainerComputerBase {
       placement,
       this.bindings,
       this.state.id.toString(),
+      () => this.computerSize(),
     );
   }
 

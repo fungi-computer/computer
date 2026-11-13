@@ -12,7 +12,12 @@ import {
   boundedVmResources,
   computerRuntimeExpired,
   computerResourceBounds,
+  computerSizeResources,
+  computerSizes,
+  platformContainerResources,
 } from "../container/resource-bounds.mjs";
+import { computerSizeSchema } from "../dist/computer-backends.js";
+import { computerSizeUnits, unitsPerDefaultVm } from "../dist/host-config.js";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath, URL } from "node:url";
@@ -89,7 +94,7 @@ async function assertConfiguredComputerBounds(configPath) {
   }
 }
 
-test("every configured platform Computer has the same CPU, memory and disk ceiling", async () => {
+test("every configured platform Computer is the one fixed instance", async () => {
   const configPaths = [
     "apps/hub/wrangler.jsonc",
     "packages/computer/wrangler.test.jsonc",
@@ -97,20 +102,59 @@ test("every configured platform Computer has the same CPU, memory and disk ceili
   ];
   for (const configPath of configPaths)
     await assertConfiguredComputerBounds(configPath);
+  // Cloudflare's standard-4: containers keep one size whatever a Computer chose.
+  assert.deepEqual(platformContainerResources, {
+    vcpus: 4,
+    memoryMib: 12_288,
+  });
+  assert.equal(computerResourceBounds.diskGib, 20);
+});
+
+test("each Computer size selects its VM resources within the largest size", () => {
+  assert.deepEqual(computerSizeSchema.options, Object.keys(computerSizes));
+  assert.deepEqual(
+    Object.fromEntries(
+      Object.keys(computerSizes).map((size) => [
+        size,
+        computerSizeResources(size),
+      ]),
+    ),
+    {
+      small: { vcpus: 2, memMib: 4_096 },
+      default: { vcpus: 4, memMib: 8_192 },
+      large: { vcpus: 8, memMib: 16_384 },
+    },
+  );
   assert.deepEqual(
     {
       vcpus: computerResourceBounds.vcpus,
-      memoryMib: computerResourceBounds.memoryMib,
-      diskGib: computerResourceBounds.diskGib,
+      memMib: computerResourceBounds.memoryMib,
     },
-    { vcpus: 4, memoryMib: 12_288, diskGib: 20 },
+    computerSizeResources("large"),
   );
+  for (const size of Object.keys(computerSizes))
+    assert.deepEqual(
+      boundedVmResources({
+        ...computerSizeResources(size),
+        diskGib: computerResourceBounds.diskGib,
+        pidsMax: computerResourceBounds.pidsMax,
+      }).vcpus,
+      computerSizes[size].vcpus,
+    );
+  assert.throws(() => computerSizeResources("huge"));
+  assert.throws(() => computerSizeResources("toString"));
+});
+
+test("host capacity weighs each size by its configured memory in 4 GiB units", () => {
+  for (const [size, resources] of Object.entries(computerSizes))
+    assert.equal(computerSizeUnits[size], resources.memoryMib / 4_096);
+  assert.equal(unitsPerDefaultVm, computerSizeUnits.default);
 });
 
 test("the VM host refuses a larger Computer and an extended runtime", () => {
   const safe = {
-    vcpus: 4,
-    memMib: 12_288,
+    vcpus: 8,
+    memMib: 16_384,
     diskGib: 20,
     pidsMax: 256,
   };
