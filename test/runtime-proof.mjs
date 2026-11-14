@@ -121,6 +121,8 @@ async function proveRuntime() {
     "start_process",
     "list_processes",
     "kill_process",
+    "process_logs",
+    "wait_process",
   ]) {
     if (!advertised.includes(expected)) {
       throw new Error(`Computer did not advertise ${expected}`);
@@ -193,6 +195,34 @@ async function proveRuntime() {
   );
   if (replacedBom.content !== bomReplacement) {
     throw new Error("Computer Files replacement did not retain BOM and CRLF");
+  }
+
+  // A null expectedContent creates the file only while it is still absent.
+  const createdPath = `${proofPath}-created`;
+  const createResponse = await replaceResponse(worker, {
+    path: createdPath,
+    expectedContent: null,
+    content: "created",
+  });
+  if (!createResponse.ok) {
+    throw new Error(
+      `Computer create-if-absent failed: ${await createResponse.text()}`,
+    );
+  }
+  replaceResult.parse(await createResponse.json());
+  const duplicateCreate = await replaceResponse(worker, {
+    path: createdPath,
+    expectedContent: null,
+    content: "again",
+  });
+  if (duplicateCreate.ok) {
+    throw new Error("Computer create-if-absent overwrote an existing file");
+  }
+  const created = filesReadResult.parse(
+    await filesRead(worker, { path: createdPath, offset: 0, limit: 128 }),
+  );
+  if (created.content !== "created") {
+    throw new Error("Computer create-if-absent changed the stored file");
   }
 
   const firstReplacement = `${proofContent}-first`;

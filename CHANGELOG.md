@@ -1,5 +1,23 @@
 # @fungi.computer/computer
 
+## 0.12.0
+
+### Minor Changes
+
+- Changes since 0.11.0:
+
+  - feat(computers): per-plan running limit from the price book, 1 h idle sleep
+  - feat(oyster): owner Stop for a standalone Computer
+  - feat(computer): ten-minute commands and detached processes Agents can read,
+    wait on and stop
+  - feat(agents): an Agent's instructions are AGENTS.md on its Home Computer
+
+### Patch Changes
+
+- Updated dependencies
+  - @fungi.computer/computer-contract@0.4.0
+  - @fungi.computer/knapsack@0.4.12
+
 ## 0.11.0
 
 ### Minor Changes

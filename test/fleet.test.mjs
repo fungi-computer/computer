@@ -660,7 +660,7 @@ test("fleet creation commits inventory and backing together and returns projecti
 });
 
 const minute = 60_000;
-const sleepWindow = 15 * minute;
+const sleepWindow = 60 * minute;
 const hostGrant = (computerId) => ({
   computerId,
   actions: new Set(["start"]),
@@ -672,7 +672,7 @@ const hostGrant = (computerId) => ({
 function idleFleet(
   t,
   FleetLifecycle,
-  { vm, beforeStop = () => Promise.resolve() },
+  { vm, beforeStop = () => Promise.resolve(), backend = {} },
 ) {
   const clock = { now: 1_000_000 };
   t.mock.method(Date, "now", () => clock.now);
@@ -698,6 +698,7 @@ function idleFleet(
     alarm: { waitUntil: () => undefined },
     computerId: "sleeper",
     backend: {
+      ...backend,
       endedByIdleSleep: (backendId) => slept.push(backendId),
       state: {
         id: { toString: () => "sleeper" },
@@ -891,6 +892,40 @@ for (const vm of [false, true]) {
   });
 }
 
+test("the owner's Stop syncs the workspace home, ends the runtime and closes the metered interval", async (t) => {
+  const { FleetLifecycle } = await import("../dist/fleet/index.js");
+  const order = [];
+  const { backing, destroyed, slept, fleet, interval, database, runtime } =
+    idleFleet(t, FleetLifecycle, {
+      vm: false,
+      backend: {
+        requireHostedRoute: () => ({
+          id: "container",
+          backing: runtimeBacking,
+        }),
+        containerRunning: async () => runtime.running,
+        syncRecycledWorkspace: async () => {
+          order.push("sync");
+        },
+      },
+    });
+  const runtimeBacking = backing;
+  try {
+    assert.deepEqual(await fleet.stopHostedComputer(), { state: "sleeping" });
+    assert.deepEqual(order, ["sync"]);
+    assert.equal(destroyed.length, 1);
+    assert.match(destroyed[0], /stopped by its owner/u);
+    assert.deepEqual(slept, ["container"]);
+    assert.equal(interval().ended, true);
+    // A second Stop on a sleeping Computer syncs and destroys nothing more.
+    assert.deepEqual(await fleet.stopHostedComputer(), { state: "sleeping" });
+    assert.deepEqual(order, ["sync"]);
+    assert.equal(destroyed.length, 1);
+  } finally {
+    database.close();
+  }
+});
+
 test("terminal and preview traffic count as on-box VM activity", async (t) => {
   const { FleetLifecycle } = await import("../dist/fleet/index.js");
   const { clock, database, backing, destroyed, fleet, interval } = idleFleet(
@@ -941,7 +976,7 @@ for (const vm of [false, true]) {
       await fleet.run(hostGrant("sleeper"), backing, async () => "ls");
       const lastActivity = clock.now;
       assert.equal(computerKeepAwake(sql(), true), true);
-      for (let step = 0; step < 30; step++) {
+      for (let step = 0; step < 40; step++) {
         clock.now += 2 * minute;
         await fleet.observe();
         assert.deepEqual(destroyed, []);

@@ -53,15 +53,15 @@ test("Git uses the runtime merged CA bundle with verification enabled", async ()
   );
 });
 
-test("the platform inactivity timeout is a 15 minute backstop, raised only for Keep awake", async () => {
+test("the platform inactivity timeout is a one hour backstop, raised only for Keep awake", async () => {
   const timeouts = [];
   const container = {
     setInactivityTimeout: async (timeout) => timeouts.push(timeout),
   };
   await configureComputerContainer(container, false);
   await configureComputerContainer(container, true);
-  assert.deepEqual(timeouts, [15 * 60 * 1_000, 24 * 60 * 60 * 1_000]);
-  assert.equal(computerContainerSleepAfterMs, 15 * 60 * 1_000);
+  assert.deepEqual(timeouts, [60 * 60 * 1_000, 24 * 60 * 60 * 1_000]);
+  assert.equal(computerContainerSleepAfterMs, 60 * 60 * 1_000);
 });
 
 test("the container kill switch refuses before configuring a container", async () => {

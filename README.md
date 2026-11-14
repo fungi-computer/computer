@@ -129,11 +129,14 @@ backend termination are different events. A reachable backend can preserve a
 process across Worker reconstruction; a sleeping or stopped backend does not
 keep that process alive.
 
-Ordinary command execution is bounded to two minutes. Long-running work uses
-process operations. Port exposure is explicit and bounded. Ports 8080 and 7681
-belong to Computer control/terminal daemons and cannot be application previews.
-The Hub owns preview admission and URLs; this runtime does not expose arbitrary
-Computer control endpoints to the browser.
+Ordinary command execution is bounded to ten minutes. Long-running work uses
+process operations: `start_process` detaches a command with no run-time limit
+(it lives within the Computer's awake window), `process_logs` reads its retained
+output tail, `wait_process` waits up to a bound for its exit, and `kill_process`
+stops it. Port exposure is explicit and bounded. Ports 8080 and 7681 belong to
+Computer control/terminal daemons and cannot be application previews. The Hub
+owns preview admission and URLs; this runtime does not expose arbitrary Computer
+control endpoints to the browser.
 
 [Container policy](src/container-policy.ts) configures idle sleep and respects
 `HOSTED_COMPUTERS`. Invalid pause settings fail closed. Network access follows

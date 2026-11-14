@@ -94,6 +94,20 @@ async function readBytes(
   return new Uint8Array(await new Response(source).arrayBuffer());
 }
 
+/** Whether anything exists at `path`; any other stat failure reaches the caller. */
+export function workspaceFileExists(
+  provider: SQLiteWorkspaceProvider,
+  path: string,
+): boolean {
+  try {
+    provider.statSync(path);
+    return true;
+  } catch (error) {
+    if (missingSchema.safeParse(error).success) return false;
+    throw error;
+  }
+}
+
 /** Read raw bounded bytes without Workspace.fs's BOM-stripping UTF-8 path. */
 export function readBoundedWorkspaceText(
   provider: SQLiteWorkspaceProvider,

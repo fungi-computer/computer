@@ -95,6 +95,8 @@ import {
   processListOutputSchema,
   processLogsInputSchema,
   processLogsOutputSchema,
+  processWaitInputSchema,
+  processWaitOutputSchema,
   maximumProcessLogLines,
   processStartInputSchema,
   processStartToolInputSchema,
@@ -107,6 +109,7 @@ import {
 import {
   createWorkspaceFilesPort,
   readBoundedWorkspaceText,
+  workspaceFileExists,
   listWorkspaceFiles,
 } from "./files.js";
 import { computerExecutionResult } from "./execution-result.js";
@@ -121,6 +124,7 @@ import {
   observeProcess,
   type ProcessObservation,
   type ProcessRuntime,
+  waitForProcessExit,
 } from "./process-inventory.js";
 import {
   assertComputerContainersEnabled,
@@ -1507,6 +1511,10 @@ export class ComputerDO extends ContainerComputer implements ComputerFilesRpc {
         return await this.listProcessesAfterAcceptance(accept);
       case "kill_process":
         return await this.killProcessAfterAcceptance(input, accept);
+      case "process_logs":
+        return this.processLogsAfterAcceptance(input, accept);
+      case "wait_process":
+        return await this.waitProcessAfterAcceptance(input, accept);
     }
     const workspace = await this.readyWorkspace();
     accept();
@@ -1890,6 +1898,42 @@ export class ComputerDO extends ContainerComputer implements ComputerFilesRpc {
     });
   }
 
+  /**
+   * Wait up to a bound for one process to exit, then return its record and
+   * retained output tail. The process keeps running past a timed-out wait.
+   */
+  async waitProcess(
+    input: ComputerValue,
+  ): Promise<z.output<typeof processWaitOutputSchema>> {
+    return await this.waitProcessAfterAcceptance(input, () => undefined);
+  }
+
+  protected async waitProcessAfterAcceptance(
+    input: ComputerValue,
+    accept: () => void,
+  ): Promise<z.output<typeof processWaitOutputSchema>> {
+    const { id, timeoutMs } = processWaitInputSchema.parse(input);
+    accept();
+    const waited = await waitForProcessExit({
+      read: () => {
+        const row = this.#processes.get(id);
+        if (row === undefined) throw new ComputerProcessNotFoundError(id);
+        return row;
+      },
+      observe: (row) => this.#observeOwnedProcess(row),
+      now: Date.now,
+      sleep: (ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
+      timeoutMs,
+    });
+    const log = this.#processes.logOf(id);
+    return processWaitOutputSchema.parse({
+      process: this.#processReceipt(waited.process),
+      lines: (log?.lines ?? []).slice(-maximumProcessLogLines),
+      truncated: log?.truncated ?? false,
+      timedOut: waited.timedOut,
+    });
+  }
+
   /** Send SIGTERM to one running process; its exit is recorded when observed. */
   async killProcess(
     input: ComputerValue,
@@ -2198,12 +2242,16 @@ export class ComputerDO extends ContainerComputer implements ComputerFilesRpc {
     const result = writeOutputSchema.parse(
       this.state.storage.transactionSync(() => {
         accept();
-        const current = readBoundedWorkspaceText(
-          provider,
-          replacement.path,
-          maximumFileBytes,
-        );
-        if (current !== replacement.expectedContent) {
+        if (replacement.expectedContent === null) {
+          if (workspaceFileExists(provider, replacement.path))
+            throw new ComputerFileConflict();
+        } else if (
+          readBoundedWorkspaceText(
+            provider,
+            replacement.path,
+            maximumFileBytes,
+          ) !== replacement.expectedContent
+        ) {
           throw new ComputerFileConflict();
         }
         provider.writeFileSync(replacement.path, replacement.content);

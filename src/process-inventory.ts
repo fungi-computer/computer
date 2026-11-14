@@ -119,6 +119,39 @@ export class ProcessLogTail {
     }
   }
 }
+/** What one wait found: the process as last read, and whether it was still running at the bound. */
+export type ProcessWaitOutcome = Readonly<{
+  process: ComputerProcess;
+  timedOut: boolean;
+}>;
+
+/**
+ * Poll one process until it is no longer running or the bound passes. The drain
+ * that watches the process records its exit; every tenth poll the caller's
+ * `observe` also asks the execution owner, so a lost watcher cannot hold a
+ * wait open. The clock and sleep are the caller's, so a fake clock drives it.
+ */
+export async function waitForProcessExit(options: {
+  read: () => ComputerProcess;
+  observe: (process: ComputerProcess) => Promise<ComputerProcess>;
+  now: () => number;
+  sleep: (ms: number) => Promise<void>;
+  timeoutMs: number;
+}): Promise<ProcessWaitOutcome> {
+  const deadline = options.now() + options.timeoutMs;
+  for (let poll = 0; ; poll += 1) {
+    const row = options.read();
+    const current =
+      row.state === "running" && poll % 10 === 9
+        ? await options.observe(row)
+        : row;
+    const remaining = deadline - options.now();
+    if (current.state !== "running" || remaining <= 0)
+      return { process: current, timedOut: current.state === "running" };
+    await options.sleep(Math.min(500, remaining));
+  }
+}
+
 function clipLine(line: string): string {
   return line.length > maximumProcessLogLineCharacters
     ? line.slice(0, maximumProcessLogLineCharacters)

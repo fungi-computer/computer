@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /** The one idle window: a Computer sleeps this long after its last activity. */
-export const computerContainerSleepAfterMs = 15 * 60 * 1_000;
+export const computerContainerSleepAfterMs = 60 * 60 * 1_000;
 /** A kept-awake container's platform backstop: the 24 hour runtime ceiling. */
 export const computerKeepAwakeTimeoutMs = 24 * 60 * 60 * 1_000;
 

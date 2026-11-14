@@ -1004,9 +1004,11 @@ const callInput = z.strictObject({
 });
 const replaceInput = z.strictObject({
   path: z.string().min(1),
-  expectedContent: z.string(),
+  expectedContent: z.string().nullable(),
   content: z.string(),
 });
+// The Files port, unlike the Computer itself, only replaces an existing file.
+const portReplaceInput = replaceInput.extend({ expectedContent: z.string() });
 const filesReadInput = z.strictObject({
   path: z.string().min(1),
   offset: z.number().int().nonnegative(),
@@ -1237,7 +1239,7 @@ export default {
       using workspace = await getWorkspace(computer);
       const port = createWorkspaceFilesPort(workspace, computer);
       return Response.json(
-        await port.replace(replaceInput.parse(await request.json())),
+        await port.replace(portReplaceInput.parse(await request.json())),
       );
     }
     return Response.json({ error: "Not found" }, { status: 404 });

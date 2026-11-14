@@ -32,7 +32,10 @@ export function createFleetSlots(
     return z.number().int().nonnegative().parse(row.count);
   };
   /** Capacity-only synchronous admission for a hosted cold start. */
-  const reserve = (computerId: string): FleetSlotReservation => {
+  const reserve = (
+    computerId: string,
+    limit: number = capacity.limit,
+  ): FleetSlotReservation => {
     try {
       return options.transactionSync(() => {
         const existing = sql
@@ -44,11 +47,11 @@ export function createFleetSlots(
         const running = count();
         if (existing !== undefined)
           return { kind: "reserved", runningComputers: running };
-        if (running >= capacity.limit)
+        if (running >= limit)
           return {
             kind: "capacity",
             runningComputers: running,
-            limit: capacity.limit,
+            limit,
             retryAfterSeconds: capacity.retryAfterSeconds,
           };
         sql.exec(

@@ -155,6 +155,31 @@ export class FleetLifecycle {
     }
   }
 
+  /**
+   * The owner's Stop: bring the runtime's workspace changes back into the
+   * durable workspace, then end the hosted runtime. Durable files survive, the
+   * Computer reads as sleeping, and the next start pushes them back. A Computer
+   * with a boot or operation in flight is refused rather than cut off.
+   */
+  async stopHostedComputer(): Promise<
+    { state: "sleeping" } | { error: "busy" }
+  > {
+    await this.awaitRuntimeMaintenance();
+    if (this.hasPendingOperations) return { error: "busy" };
+    const hosted = this.ports.backend.requireHostedRoute();
+    this.usage.ensure();
+    if (await this.ports.backend.containerRunning(hosted.backing)) {
+      await this.ports.backend.syncRecycledWorkspace(hosted.backing);
+      await this.destroyRuntime(
+        hosted.backing,
+        "Computer stopped by its owner",
+      );
+      this.ports.backend.endedByIdleSleep(attachedBackendId(hosted.backing));
+    }
+    await this.observeOpenRuntimes();
+    return { state: "sleeping" };
+  }
+
   /** Read liveness without waking a sleeping backend. Queue state wins over booting. */
   async readComputerState() {
     const backends = await this.readAttachedBackends();
