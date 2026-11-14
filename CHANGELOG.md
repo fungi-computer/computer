@@ -1,5 +1,13 @@
 # @fungi.computer/computer
 
+## 0.12.1
+
+### Patch Changes
+
+- Changes since 0.12.0:
+
+  - fix(computer): upgrade a Computer store from before Computer sizes
+
 ## 0.12.0
 
 ### Minor Changes

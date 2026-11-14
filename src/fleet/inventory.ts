@@ -71,6 +71,15 @@ export function createFleetInventory(
     sql.exec(
       "CREATE TABLE IF NOT EXISTS hub_team_computers (computer_id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, size TEXT NOT NULL CHECK (size IN ('small','default','large')), actor_kind TEXT NOT NULL, actor_id TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)), created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL) STRICT",
     );
+    // A store created before Computer sizes keeps its old table: give the
+    // Computers it already holds the default size.
+    const columns = z
+      .array(z.looseObject({ name: z.string() }))
+      .parse(sql.exec("PRAGMA table_info(hub_team_computers)").toArray());
+    if (!columns.some(({ name }) => name === "size"))
+      sql.exec(
+        `ALTER TABLE hub_team_computers ADD COLUMN size TEXT NOT NULL DEFAULT '${defaultComputerSize}' CHECK (size IN ('small','default','large'))`,
+      );
     sql.exec(
       "CREATE TABLE IF NOT EXISTS hub_team_computer_create_receipts (request_id TEXT PRIMARY KEY, actor_kind TEXT NOT NULL, actor_id TEXT NOT NULL, requested_name TEXT, name TEXT NOT NULL, computer_id TEXT NOT NULL REFERENCES hub_team_computers(computer_id)) STRICT",
     );

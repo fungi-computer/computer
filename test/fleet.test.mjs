@@ -997,3 +997,35 @@ for (const vm of [false, true]) {
     }
   });
 }
+
+test("a Computer store from before Computer sizes upgrades in place and keeps its Computers", async () => {
+  const { createFleetInventory } = await import("../dist/fleet/index.js");
+  const { defineIdFamily } = await import("@fungi.computer/cairn/id");
+  const computerId = defineIdFamily({
+    family: "computer",
+    version: 1,
+    kinds: { computer: { prefix: "computer" } },
+  }).computer.generate();
+  const database = new DatabaseSync(":memory:");
+  try {
+    database.exec(
+      "CREATE TABLE hub_team_computers (computer_id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, actor_kind TEXT NOT NULL, actor_id TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)), created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL) STRICT",
+    );
+    database
+      .prepare(
+        "INSERT INTO hub_team_computers (computer_id,name,actor_kind,actor_id,active,created_at,updated_at) VALUES (?,?,?,?,1,1,1)",
+      )
+      .run(computerId, "mossy-ledge", "owner", "owner-one");
+    const owner = fromNodeSqlite(database);
+    const inventory = createFleetInventory(owner);
+    inventory.ensure();
+    inventory.ensure();
+    const page = inventory.list({ limit: 10, offset: 0 });
+    assert.deepEqual(
+      page.computers.map(({ name, size }) => ({ name, size })),
+      [{ name: "mossy-ledge", size: "default" }],
+    );
+  } finally {
+    database.close();
+  }
+});
