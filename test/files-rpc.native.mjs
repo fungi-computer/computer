@@ -76,6 +76,24 @@ try {
   assert.match(moved.createThenRefuse.refused, /into itself/);
   assert.deepEqual(moved.afterRefuse, moved.afterCreate);
   console.log("PASS a refused move rolls back the folders createParents made");
+  const removed = await (
+    await globalThis.fetch(`${worker.baseUrl}/remove`)
+  ).json();
+  assert.deepEqual(removed.file, { ok: { path: "/gone/a.png" } });
+  assert.deepEqual(removed.afterFile, [
+    "/gone/Folder",
+    "/gone/Folder/c.png",
+    "/gone/b.png",
+  ]);
+  console.log("PASS files.remove deletes one file and leaves its siblings");
+  assert.match(removed.absent.refused, /no such file/);
+  console.log("PASS files.remove refuses a path that is already absent");
+  assert.match(removed.directory.refused, /directory is not deleted/);
+  assert.deepEqual(removed.afterDirectory, removed.afterFile);
+  console.log("PASS files.remove refuses a directory and keeps its subtree");
+  assert.ok(removed.relative.refused);
+  assert.deepEqual(removed.afterDirectory.includes("/gone/b.png"), true);
+  console.log("PASS files.remove refuses a path outside the workspace root");
 } finally {
   if (worker) await workers.stop(worker);
   await workers.dispose();

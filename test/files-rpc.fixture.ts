@@ -107,6 +107,41 @@ export default {
       out.afterRefuse = await tree();
       return Response.json(out);
     }
+    if (path === "/remove") {
+      const attempt = async (
+        input: Parameters<
+          ReturnType<ComputerNamespace["getByName"]>["call"]
+        >[1],
+      ) => {
+        try {
+          return { ok: await computer.call("remove", input) };
+        } catch (error) {
+          return { refused: error instanceof Error ? error.message : "?" };
+        }
+      };
+      const tree = async () =>
+        (await workspace.fs.find("/gone", "**/*"))
+          .map((entry) => entry.path)
+          .sort();
+      await workspace.fs.mkdir("/gone/Folder", { recursive: true });
+      await workspace.fs.writeFile("/gone/a.png", "a");
+      await workspace.fs.writeFile("/gone/b.png", "b");
+      await workspace.fs.writeFile("/gone/Folder/c.png", "c");
+      const file = await attempt({ path: "/gone/a.png" });
+      const afterFile = await tree();
+      const absent = await attempt({ path: "/gone/a.png" });
+      const directory = await attempt({ path: "/gone/Folder" });
+      const afterDirectory = await tree();
+      const relative = await attempt({ path: "gone/b.png" });
+      return Response.json({
+        file,
+        afterFile,
+        absent,
+        directory,
+        afterDirectory,
+        relative,
+      });
+    }
     return new Response(null, { status: 404 });
   },
 };

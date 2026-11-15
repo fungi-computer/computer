@@ -1,5 +1,18 @@
 # @fungi.computer/computer
 
+## 0.13.0
+
+### Minor Changes
+
+- Changes since 0.12.2:
+
+  - feat(computer): add the files.remove operation for Media erase
+
+### Patch Changes
+
+- Updated dependencies
+  - @fungi.computer/computer-contract@0.5.0
+
 ## 0.12.2
 
 ### Patch Changes

@@ -78,6 +78,9 @@ import {
   moveInputSchema,
   moveOutputSchema,
   ComputerFileMoveError,
+  ComputerFileRemoveError,
+  removeInputSchema,
+  removeOutputSchema,
   readInputSchema,
   readBytesInputSchema,
   readOutputSchema,
@@ -314,6 +317,30 @@ function move(workspace: Workspace, input: ComputerValue) {
     throw cause;
   }
   return moveOutputSchema.parse({ from, to });
+}
+
+/**
+ * Delete one file through the Workspace provider's `unlink`. A directory and
+ * a missing path are refused; call inside one storage transaction.
+ */
+function remove(workspace: Workspace, input: ComputerValue) {
+  const { path } = removeInputSchema.parse(input);
+  const provider = new SQLiteWorkspaceProvider(workspace.fs.db);
+  let stat;
+  try {
+    stat = provider.lstatSync(path);
+  } catch (cause) {
+    if (isMissing.safeParse(cause).success)
+      throw new ComputerFileRemoveError("missing", `no such file: ${path}`);
+    throw cause;
+  }
+  if (stat.isDirectory())
+    throw new ComputerFileRemoveError(
+      "invalid",
+      `a directory is not deleted: ${path}`,
+    );
+  provider.unlinkSync(path);
+  return removeOutputSchema.parse({ path });
 }
 
 async function write(workspace: Workspace, input: ComputerValue) {
@@ -1539,6 +1566,14 @@ export class ComputerDO extends ContainerComputer implements ComputerFilesRpc {
         await this.#syncRunningHosted("pull");
         const result = this.state.storage.transactionSync(() =>
           move(workspace, input),
+        );
+        await this.#syncRunningHosted("push");
+        return result;
+      }
+      case "remove": {
+        await this.#syncRunningHosted("pull");
+        const result = this.state.storage.transactionSync(() =>
+          remove(workspace, input),
         );
         await this.#syncRunningHosted("push");
         return result;
