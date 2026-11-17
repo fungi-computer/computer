@@ -127,6 +127,64 @@ test("concurrent one-time exchange creates exactly one session and strips only t
   );
 });
 
+test("refuses same-site sibling or malformed Origin/Referer before exchange; same-origin, absent and cross-site pass", async () => {
+  const f = await fixture();
+  const token = await f.issue();
+  const sibling = "https://sibling.preview.test";
+  const refused = [
+    { origin: sibling },
+    { referer: `${sibling}/page` },
+    { origin: "https://preview.test:8443" },
+    { origin: "http://preview.test" },
+    { origin: "https://preview.test", referer: `${sibling}/page` },
+    { origin: "https://foreign.example", referer: `${sibling}/` },
+    { origin: "null" },
+    { origin: "https://" },
+    { referer: "not a url" },
+  ];
+  for (const headers of refused)
+    assert.equal(
+      (await f.call(`/page?token=${token}`, headers)).status,
+      401,
+      JSON.stringify(headers),
+    );
+  // Refusal happened before exchange: the one-time token still works.
+  const exchanged = await f.call(`/page?token=${token}`, {
+    referer: "https://preview.test/start",
+  });
+  assert.equal(exchanged.status, 302);
+  for (const headers of refused)
+    assert.equal(
+      (await f.call("/asset.js", { ...headers, cookie: cookie(exchanged) }))
+        .status,
+      401,
+      JSON.stringify(headers),
+    );
+  for (const headers of [
+    {},
+    { origin: "https://preview.test" },
+    { origin: "https://preview.test", referer: "https://preview.test/a" },
+    { origin: "https://foreign.example" },
+    { referer: "https://foreign.example/link" },
+  ])
+    assert.equal(
+      (await f.call("/asset.js", { ...headers, cookie: cookie(exchanged) }))
+        .status,
+      200,
+      JSON.stringify(headers),
+    );
+  const upgrade = await f.call("/websocket-proof", {
+    cookie: cookie(exchanged),
+    origin: "https://preview.test",
+    referer: `${sibling}/`,
+  });
+  assert.deepEqual(await upgrade.json(), {
+    status: 401,
+    socket: false,
+    cookie: false,
+  });
+});
+
 test("tokens and sessions bind to one Computer and port, expire without sliding, and store only hashes", async () => {
   const f = await fixture();
   const other = await fixture();

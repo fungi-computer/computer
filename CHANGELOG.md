@@ -1,5 +1,13 @@
 # @fungi.computer/computer
 
+## 0.14.4
+
+### Patch Changes
+
+- Changes since 0.14.3:
+
+  - fix(computer): refuse same-site sibling Origin and Referer at the port gate
+
 ## 0.14.3
 
 ### Patch Changes

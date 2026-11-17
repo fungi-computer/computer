@@ -16,6 +16,8 @@ const principalSchema = z.union([
 ]);
 /** Visibility belongs to an existing exposed port, never a second catalog. */
 export type PortVisibility = "private" | "unlisted" | "public";
+/** A host's registrable site, or null when it has none (IPs, single labels). */
+export type PortSite = (url: URL) => string | null;
 const credentialSchema = z
   .string()
   .length(LONG)
@@ -73,6 +75,22 @@ async function hash(value: string): Promise<string> {
   return Array.from(new Uint8Array(digest), (byte) =>
     byte.toString(16).padStart(2, "0"),
   ).join("");
+}
+
+/**
+ * Sibling hosts on one site share Lax cookies, so a present Origin or Referer
+ * must be this exact origin or another site. A value the URL parser refuses,
+ * including the opaque `null` Origin, is refused too. Absent headers pass.
+ */
+function fromSibling(request: Request, target: URL, site: PortSite): boolean {
+  const siteOf = (url: URL) => site(url) ?? url.hostname;
+  return ["origin", "referer"].some((name) => {
+    const value = request.headers.get(name);
+    if (value === null) return false;
+    if (!URL.canParse(value)) return true;
+    const source = new URL(value);
+    return source.origin !== target.origin && siteOf(source) === siteOf(target);
+  });
 }
 
 /** One Computer's port credentials; the host owns membership and routing. */
@@ -267,10 +285,11 @@ export class ComputerPortAccess {
   /** Mount on one target host. Forwarding remains responsible for live exposure. */
   gate(
     portInput: number,
-    entryUrl: string,
+    policy: Readonly<{ entryUrl: string; site: PortSite }>,
     forward: (request: Request) => Response | Promise<Response>,
   ): Hono {
     const port = computerPortSchema.parse(portInput);
+    const { entryUrl, site } = policy;
     const app = new Hono();
     app.all("*", async (c) => {
       c.header("Cache-Control", "no-store");
@@ -287,10 +306,12 @@ export class ComputerPortAccess {
           : c.body(null, 401);
       // Sibling preview hosts are same-site but must never use each other's
       // cookies. WebSockets bypass CORS, so require their exact origin too.
+      const target = new URL(c.req.url);
       const upgrade = c.req.raw.headers.has("upgrade");
       if (
         c.req.header("sec-fetch-site") === "same-site" ||
-        (upgrade && c.req.header("origin") !== new URL(c.req.url).origin)
+        fromSibling(c.req.raw, target, site) ||
+        (upgrade && c.req.header("origin") !== target.origin)
       )
         return denied();
       const visibility = this.visibility(port);

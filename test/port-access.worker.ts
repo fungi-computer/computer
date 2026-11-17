@@ -33,6 +33,12 @@ export class PortAccessProof extends DurableObject {
     if (url.searchParams.get("public") === "on")
       options = { ...options, publicAccess: "on" };
     const access = new ComputerPortAccess(this.ctx.storage, options);
+    // The fixture's site is its last two labels; Oyster supplies the public
+    // suffix list.
+    const policy = {
+      entryUrl: "https://fungi.test/open",
+      site: (target: URL) => target.hostname.split(".").slice(-2).join("."),
+    };
     const port = z.coerce
       .number()
       .parse(url.searchParams.get("port") ?? "5173");
@@ -83,7 +89,7 @@ export class PortAccessProof extends DurableObject {
         sessions: sql.exec("SELECT * FROM computer_port_session").toArray(),
       });
     if (url.pathname === "/websocket-proof") {
-      const gate = access.gate(port, "https://fungi.test/open", (forwarded) => {
+      const gate = access.gate(port, policy, (forwarded) => {
         if (forwarded.headers.has("cookie"))
           throw new Error("credential leaked");
         if (forwarded.headers.get("upgrade") !== "websocket")
@@ -113,7 +119,7 @@ export class PortAccessProof extends DurableObject {
         cookie: result.headers.has("set-cookie"),
       });
     }
-    const gate = access.gate(port, "https://fungi.test/open", (forwarded) =>
+    const gate = access.gate(port, policy, (forwarded) =>
       Response.json(
         {
           headers: Object.fromEntries(forwarded.headers),
