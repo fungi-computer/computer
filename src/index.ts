@@ -1225,11 +1225,6 @@ export class ComputerDO extends ContainerComputer implements ComputerFilesRpc {
     });
     if (!exposed)
       return Response.json({ error: "port is not exposed" }, { status: 404 });
-    if (request.headers.has("upgrade"))
-      return Response.json(
-        { error: "preview WebSocket upgrades are not supported" },
-        { status: 400 },
-      );
 
     try {
       const headers = new Headers(request.headers);
@@ -1260,13 +1255,9 @@ export class ComputerDO extends ContainerComputer implements ComputerFilesRpc {
           .port(port)
           .fetch(new Request(forwarded, { headers })),
       );
-      const safeHeaders = new Headers(response.headers);
-      safeHeaders.delete("set-cookie");
-      return new Response(response.body, {
-        status: response.status,
-        statusText: response.statusText,
-        headers: safeHeaders,
-      });
+      const safe = new Response(response.body, response);
+      safe.headers.delete("set-cookie");
+      return safe;
     } catch (cause) {
       console.error("Computer runtime operation failed", cause);
 

@@ -38,7 +38,7 @@ FROM node:24.20.0-trixie-slim@sha256:a747ad80c8a161b650d79a6da9c422005b91148b18b
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
-    fuse3 libfuse2t64 ca-certificates curl git tini \
+    fuse3 libfuse2t64 ca-certificates curl git procps tini \
   && rm -rf /var/lib/apt/lists/*
 
 RUN npm install --global --no-fund --no-audit pnpm@11.24.0 \

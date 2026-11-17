@@ -1,5 +1,31 @@
 # @fungi.computer/computer
 
+## 0.14.0
+
+### Minor Changes
+
+- Changes since 0.13.0:
+
+  - fix(computer): install procps in the Computer image so Stop can end a
+    session
+  - fix: isolate Oyster previews and refuse sibling requests
+  - fix(computer): preserve service tokens on admitted WebSocket upgrades
+  - fix(oyster): open reusable preview links through owner admission
+  - feat(oyster): admit private port previews through owner sessions
+  - feat(computer): retain private port access tokens and sessions
+  - fix(computer): align runtime named group with its numeric identity
+  - feat(computer): add VM-only sudo and Docker image layer
+
+### Patch Changes
+
+- Updated dependencies
+- Updated dependencies
+  - @fungi.computer/cordyceps@0.4.3
+  - @fungi.computer/watchdog@0.1.4
+  - @fungi.computer/knapsack@0.4.14
+  - @fungi.computer/computer-contract@0.5.1
+  - @fungi.computer/seam@0.2.6
+
 ## 0.13.0
 
 ### Minor Changes

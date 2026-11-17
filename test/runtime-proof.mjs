@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import process from "node:process";
 import { URLSearchParams } from "node:url";
 import { z } from "zod";
+import { maximumExecutionTimeMs } from "@fungi.computer/computer-contract";
 import { proofWorkers } from "./proof-worker.mjs";
 import { proofFailure } from "./proof-client.mjs";
 
@@ -130,7 +131,7 @@ async function proveRuntime() {
   }
   await expectCallFailure(worker, "exec", {
     command: "true",
-    timeoutMs: 120_001,
+    timeoutMs: maximumExecutionTimeMs + 1,
   });
   await expectCallFailure(worker, "write", {
     path: `/missing-parent-${randomUUID()}/proof.txt`,

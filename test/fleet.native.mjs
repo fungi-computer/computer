@@ -24,6 +24,7 @@ try {
       provenance: { actor: "local-owner", via: "local-invocation" },
       runtimeId: "runtime-one",
       backing: { kind: "platform-container" },
+      size: "default",
       startedAt: 1_000,
       observedAt: 2_000,
       ended: true,

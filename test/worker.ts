@@ -976,8 +976,6 @@ export class ComputerDO extends NativeComputerDO {
       serviceUrl.pathname = path;
       serviceUrl.search = url.search;
       const previewRequest = new Request(serviceUrl, request);
-      if (path === "/__proof_websocket_upgrade")
-        previewRequest.headers.set("Upgrade", "websocket");
       return await this.portPreviewAfterAcceptance(
         port,
         previewRequest,

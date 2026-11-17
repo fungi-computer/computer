@@ -6,7 +6,10 @@ import { spawn } from "node:child_process";
 import process from "node:process";
 import { setTimeout, clearTimeout } from "node:timers";
 import { fileURLToPath, URL } from "node:url";
-import { enterRuntimePhase } from "./runtime-privileges.mjs";
+import {
+  enterRuntimePhase,
+  readRuntimePrivilegeMode,
+} from "./runtime-privileges.mjs";
 import { boundedRuntimeMs } from "./resource-bounds.mjs";
 
 const computerd = "/opt/fungi/computerd.cjs";
@@ -23,6 +26,20 @@ function log(message, fields) {
   process.stderr.write(
     `${JSON.stringify({ component: "computer-init", message, ...fields })}\n`,
   );
+}
+
+// The maintained Debian service detaches dockerd. Its failure must not stop
+// the Computer; a user can recover it with sudo service docker restart.
+if (readRuntimePrivilegeMode() === "vm-sudo") {
+  const docker = spawn("/usr/sbin/service", ["docker", "start"], {
+    stdio: ["ignore", "inherit", "inherit"],
+  });
+  docker.once("error", (error) =>
+    log("Docker service failed to start", { error: error.message }),
+  );
+  docker.once("exit", (code) => {
+    if (code !== 0) log("Docker service failed to start", { code });
+  });
 }
 
 let terminal;
@@ -80,8 +97,8 @@ try {
     });
   });
   enterRuntimePhase();
-  // exec the terminal runtime with the permanent UID/GID and no-new-privs
-  // inherited. The mount daemon retains its live FUSE descriptor and VFS state.
+  // exec the terminal runtime with the permanent UID/GID and the image
+  // privilege mode inherited. The mount daemon retains its live FUSE descriptor and VFS state.
   terminal = spawn(process.execPath, ["/opt/fungi/terminal-runtime.mjs"], {
     stdio: ["ignore", "inherit", "inherit", "ipc"],
     env: process.env,

@@ -1,7 +1,9 @@
-/* global fetch, setTimeout */
+/* global fetch, setTimeout, clearTimeout, WebSocket */
 import assert from "node:assert/strict";
 import process from "node:process";
 import { z } from "zod";
+import { build } from "esbuild";
+import { fileURLToPath, URL } from "node:url";
 import { proofWorkers } from "./proof-worker.mjs";
 import { proofClient, proofFailure } from "./proof-client.mjs";
 
@@ -58,47 +60,26 @@ async function preview(port, path, init) {
   );
 }
 
-const serviceSource = `
-import { createServer } from "node:http";
-const port = Number(process.argv[2]);
-const server = createServer(async (request, response) => {
-  const chunks = [];
-  for await (const chunk of request) chunks.push(chunk);
-  const body = Buffer.concat(chunks).toString("utf8");
-  response.setHeader("content-type", "application/json");
-  response.setHeader("set-cookie", "gateway=stolen; Domain=example.test");
-  response.end(JSON.stringify({
-    method: request.method,
-    url: request.url,
-    host: request.headers.host ?? "",
-    marker: request.headers["x-proof-marker"] ?? "",
-    receivedCredentialHeaders: ["authorization", "cookie", "proxy-authorization", "cf-access-jwt-assertion", "cf-access-client-id", "cf-access-client-secret", "x-authenticated-user", "x-auth-request-user", "x-user-id", "x-forwarded-user", "x-forwarded-email"].filter((name) => request.headers[name] !== undefined),
-    body,
-  }));
-});
-server.listen(port, "0.0.0.0");
-`;
-
 try {
   worker = await startWorker();
   const exposedPort = 20_000 + Math.floor(Math.random() * 20_000);
   const missingPort = exposedPort + 1;
   await call("mkdir", { path: "/workspace" });
+  const bundled = await build({
+    entryPoints: [
+      fileURLToPath(new URL("./port-service.fixture.mjs", import.meta.url)),
+    ],
+    bundle: true,
+    write: false,
+    platform: "node",
+    format: "cjs",
+    external: ["bufferutil", "utf-8-validate"],
+  });
   await call("write", {
-    path: "/workspace/port-service.mjs",
-    content: serviceSource,
+    path: "/workspace/port-service.cjs",
+    content: bundled.outputFiles[0].text,
   });
   await expose(exposedPort);
-
-  const upgrade = await preview(exposedPort, "/__proof_websocket_upgrade");
-  assert.equal(
-    upgrade.status,
-    400,
-    "preview upgrades must be refused before forwarding",
-  );
-  assert.deepEqual(await upgrade.json(), {
-    error: "preview WebSocket upgrades are not supported",
-  });
 
   const denied = await preview(missingPort, "/private");
   assert.equal(denied.status, 404, "unexposed ports must not be proxied");
@@ -132,7 +113,7 @@ try {
   );
 
   const started = await call("bash", {
-    command: `node /workspace/port-service.mjs ${String(exposedPort)} >/tmp/port-service-${String(exposedPort)}.log 2>&1 </dev/null &`,
+    command: `node /workspace/port-service.cjs ${String(exposedPort)} >/tmp/port-service-${String(exposedPort)}.log 2>&1 </dev/null &`,
     cwd: "/workspace",
     timeoutMs: 10_000,
   });
@@ -180,6 +161,41 @@ try {
     !reply.host.includes("127.0.0.1"),
     "caller Host must not select the target",
   );
+  const websocketUrl = new URL(
+    `/port-preview/${String(exposedPort)}/hmr`,
+    worker.baseUrl,
+  );
+  websocketUrl.protocol = "ws:";
+  await new Promise((resolve, reject) => {
+    const socket = new WebSocket(websocketUrl);
+    let echoed = false;
+    const timeout = setTimeout(() => {
+      socket.close();
+      reject(new Error("Preview WebSocket timed out"));
+    }, 10_000);
+    socket.addEventListener("open", () => socket.send("hmr"));
+    socket.addEventListener("message", (event) => {
+      try {
+        assert.equal(event.data, "echo:hmr");
+        echoed = true;
+        socket.close();
+      } catch (error) {
+        clearTimeout(timeout);
+        socket.close();
+        reject(error);
+      }
+    });
+    socket.addEventListener("error", () => {
+      clearTimeout(timeout);
+      reject(new Error("Preview WebSocket failed"));
+    });
+    socket.addEventListener("close", () => {
+      clearTimeout(timeout);
+      if (echoed) resolve();
+      else reject(new Error("Preview WebSocket closed before its echo"));
+    });
+  });
+
   const authorityLikePath = await preview(
     exposedPort,
     "//outside.invalid/asset?theme=night",

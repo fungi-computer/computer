@@ -18,7 +18,9 @@ import {
 } from "../container/resource-bounds.mjs";
 import { computerSizeSchema } from "../dist/computer-backends.js";
 import { computerSizeUnits, unitsPerDefaultVm } from "../dist/host-config.js";
-import { readFile } from "node:fs/promises";
+import { readFile, mkdtemp, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { readRuntimePrivilegeMode } from "../container/runtime-privileges.mjs";
 import { resolve } from "node:path";
 import { fileURLToPath, URL } from "node:url";
 import ts from "typescript";
@@ -168,4 +170,36 @@ test("the VM host refuses a larger Computer and an extended runtime", () => {
   assert.throws(() => boundedRuntimeMs("86400001"));
   assert.equal(computerRuntimeExpired(1_000, 1_999, 1_000), false);
   assert.equal(computerRuntimeExpired(1_000, 2_000, 1_000), true);
+});
+
+test("privilege mode defaults to contained and rejects an unknown image marker", async () => {
+  const directory = await mkdtemp(resolve(tmpdir(), "computer-mode-"));
+  const marker = resolve(directory, "mode");
+  try {
+    assert.equal(readRuntimePrivilegeMode(marker), "contained");
+    for (const mode of ["contained", "vm-sudo"]) {
+      await writeFile(marker, `${mode}\n`);
+      assert.equal(readRuntimePrivilegeMode(marker), mode);
+    }
+    await writeFile(marker, "sudo");
+    assert.throws(
+      () => readRuntimePrivilegeMode(marker),
+      /Invalid Computer runtime privilege mode/u,
+    );
+    assert.throws(() => readRuntimePrivilegeMode(directory));
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("the platform image stays contained", async () => {
+  const platform = await readFile(
+    resolve(repositoryRoot, "packages/computer/Dockerfile"),
+    "utf8",
+  );
+  assert.doesNotMatch(
+    platform,
+    /runtime-privilege-mode|apt-get install[^\n]*sudo/u,
+  );
+  assert.match(platform, /find \/ -xdev -perm \/6000 -exec chmod a-s/u);
 });

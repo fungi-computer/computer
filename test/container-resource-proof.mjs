@@ -23,6 +23,16 @@ async function docker(...args) {
   return `${stdout}${stderr}`.trim();
 }
 
+await docker(
+  "run",
+  "--rm",
+  "--entrypoint",
+  "/bin/sh",
+  image,
+  "-ec",
+  'test ! -e /etc/fungi/runtime-privilege-mode; ! command -v sudo; test -z "$(find / -xdev -perm /6000)"',
+);
+
 async function start(name, extra = []) {
   const id = await docker(
     "run",

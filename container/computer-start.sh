@@ -12,7 +12,8 @@ else
   printf '%s\n' "$uid" >"$uid_file"
 fi
 if ! getent passwd "$uid" >/dev/null; then
-  useradd --no-log-init --uid "$uid" --user-group --no-create-home --home-dir /workspace --shell /bin/bash fungi
+  groupadd --gid "$uid" fungi
+  useradd --no-log-init --uid "$uid" --gid "$uid" --no-create-home --home-dir /workspace --shell /bin/bash fungi
 fi
 export COMPUTER_RUNTIME_UID="$uid"
 pids_max=$(node --input-type=module -e 'import { computerResourceBounds } from "/opt/fungi/resource-bounds.mjs"; process.stdout.write(String(computerResourceBounds.pidsMax))')

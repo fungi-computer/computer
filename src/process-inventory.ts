@@ -22,6 +22,7 @@ import {
   type ComputerProcessSync,
 } from "@fungi.computer/computer-contract";
 import { ComputerOperationConflictError } from "./operation-record.js";
+import { initializePortAccess } from "./port-access.js";
 
 /** The durable SQLite surface owned by processes and their port exposures. */
 export type ComputerProcessStorage = Pick<
@@ -190,6 +191,7 @@ export class ComputerProcessInventory {
       storage.sql.exec(
         "CREATE TABLE IF NOT EXISTS computer_exposed_ports (port INTEGER PRIMARY KEY CHECK (port BETWEEN 1 AND 65535), process_id TEXT) STRICT",
       );
+      initializePortAccess(storage);
     });
   }
   #matching(
