@@ -1,5 +1,13 @@
 # @fungi.computer/computer
 
+## 0.14.8
+
+### Patch Changes
+
+- Changes since 0.14.7:
+
+  - perf(computer): load the shell module groups when a shell starts
+
 ## 0.14.7
 
 ### Patch Changes

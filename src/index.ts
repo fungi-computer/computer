@@ -23,10 +23,6 @@ import {
   WorkerShellBackend,
   type WorkerShellBackendOptions,
 } from "@fungi.computer/cloudflare-computer/backends/worker-shell";
-import jqCommands from "@fungi.computer/cloudflare-computer/shell/jq";
-import yqCommands from "@fungi.computer/cloudflare-computer/shell/yq";
-import xanCommands from "@fungi.computer/cloudflare-computer/shell/xan";
-import fileCommands from "@fungi.computer/cloudflare-computer/shell/file";
 import {
   withWorkspaceContainer,
   type IWorkspaceContainerAPI,
@@ -783,7 +779,24 @@ class ContainerComputer extends ContainerComputerBase {
             id: this.state.id.toString(),
           },
           ctx: this.workerShellContext(),
-          commands: [jqCommands, yqCommands, xanCommands, fileCommands],
+          commands: [
+            () =>
+              import("@fungi.computer/cloudflare-computer/shell/jq").then(
+                (m) => m.default,
+              ),
+            () =>
+              import("@fungi.computer/cloudflare-computer/shell/yq").then(
+                (m) => m.default,
+              ),
+            () =>
+              import("@fungi.computer/cloudflare-computer/shell/xan").then(
+                (m) => m.default,
+              ),
+            () =>
+              import("@fungi.computer/cloudflare-computer/shell/file").then(
+                (m) => m.default,
+              ),
+          ],
           egress: { mode: "none" },
         }),
       );
