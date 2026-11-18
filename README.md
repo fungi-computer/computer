@@ -1,5 +1,51 @@
 # Computer (`@fungi.computer/computer`)
 
+A Fungi Computer is a workspace for AI agents: files that stay put, and a Linux
+container to run commands in.
+
+```mermaid
+flowchart LR
+  Agent[Agent or App] -->|files, commands, ports| DO[ComputerDO]
+  DO --> Files[(Files in SQLite)]
+  DO -->|runs commands| Backend[Container or in-Worker shell]
+  Host[Oyster or the Hub] --> DO
+```
+
+## Quick start
+
+Export the Computer from your Worker. It is the same line Oyster's standalone
+host uses.
+
+```ts
+export { ComputerDO } from "@fungi.computer/computer";
+```
+
+The [Oyster README](https://github.com/fungi-computer/oyster) deploys the whole
+thing, including the container.
+
+## Common tasks
+
+### Read and write files
+
+Files belong to the workspace, not to a shell process. See
+[Files and operation results](#files-and-operation-results).
+
+### Run commands and expose ports
+
+See [Processes, ports and lifetime](#processes-ports-and-lifetime).
+
+### Pick where commands run
+
+See [Choose an execution backend](#choose-an-execution-backend).
+
+### Build the container image
+
+See [Image and build inputs](#image-and-build-inputs).
+
+## Reference
+
+### Overview
+
 A Fungi Computer is a durable workspace for Agents: files in SQLite inside a
 Durable Object, with a Linux container or an in-Worker shell behind it to run
 commands, processes and ports. Oyster's standalone host runs one; the Fungi Hub
@@ -165,7 +211,7 @@ egress data, plus opaque actor/invocation provenance. `checkComputerGrant`
 returns `admitted` or `Refused`; grants impose no paid-usage budget. A caller's
 per-command timeout remains a command parameter enforced by the operation
 executor. Hub credit enforcement remains on its existing funded/unfunded
-admission and `creditChanged` → credit-publication restate/stop path.
+admission path, which restates or stops a Computer when a Team's credit changes.
 
 `createFleetBacking` accepts the maintained SQLite owner. Creation records a
 plain backing decision once. Explicit fleet-default and Computer overrides
@@ -278,3 +324,7 @@ require a working local Docker/Workers environment. These commands do not deploy
 a Hub, publish an App or replace a production Computer image.
 
 MIT. See [`LICENSE`](LICENSE).
+
+## Examples
+
+The [Quick start](#quick-start) above is the maintained example.
