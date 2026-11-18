@@ -39,7 +39,7 @@ const grant: ComputerGrant = computerGrantSchema.parse({
 });
 const actions: ReadonlySet<string> = grant.actions;
 const egress: ComputerEgressDecision = decideComputerEgress(
-  { method: "GET" },
+  { method: "GET", headers: new Headers() },
   new URL("https://oyster.test/settings"),
 );
 void { route, projection, actions, egress };

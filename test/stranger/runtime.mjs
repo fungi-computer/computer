@@ -44,7 +44,7 @@ const host = {
 };
 assert.deepEqual(
   decideComputerEgress(
-    { method: "GET" },
+    { method: "GET", headers: new globalThis.Headers() },
     new URL("https://oyster.test/git/app/repo.git/info/refs"),
     host,
   ),
@@ -52,7 +52,7 @@ assert.deepEqual(
 );
 assert.equal(
   decideComputerEgress(
-    { method: "GET" },
+    { method: "GET", headers: new globalThis.Headers() },
     new URL("https://oyster.test/settings"),
     host,
   ).kind,

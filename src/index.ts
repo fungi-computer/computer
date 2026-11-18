@@ -3,6 +3,14 @@ export type { WorkspaceRuntimeResultOptions } from "@fungi.computer/cloudflare-c
 export { createLocalBackendReplayStore } from "./local-backend-replay.js";
 import { computerInternetAccess } from "./internet-access.js";
 import {
+  createComputerVaultReferences,
+  isVaultExecutionContext,
+  vaultExecutionHooks,
+  type ComputerVaultReferences,
+  type VaultGrantPort,
+  type VaultReferenceAdmission,
+} from "./vault-references.js";
+import {
   computerName,
   learnComputerName,
   recordComputerName,
@@ -932,6 +940,7 @@ export class ComputerDO extends ContainerComputer implements ComputerFilesRpc {
   #operationRecord: ComputerOperationRecord | undefined;
   #processRecord: ComputerProcessInventory | undefined;
   #executionRecord: ComputerExecutionLifecycle | undefined;
+  #vaultReferenceRecord: ComputerVaultReferences | undefined;
   readonly #processStarts = new Map<string, PendingProcessStart>();
   #terminalSync: Promise<void> | undefined;
 
@@ -954,6 +963,36 @@ export class ComputerDO extends ContainerComputer implements ComputerFilesRpc {
   /** Ordinary Computers have no credential host; resource hosts override it. */
   protected executionHooks(): ComputerExecutionHostHooks | undefined {
     return undefined;
+  }
+
+  get #vaultReferences(): ComputerVaultReferences {
+    return (this.#vaultReferenceRecord ??= createComputerVaultReferences(
+      this.state.storage.sql,
+    ));
+  }
+
+  /**
+   * The hooks that put an Agent command's Vault references in its
+   * environment, beside the host's own (see `withVaultExecution`).
+   */
+  protected vaultExecutionHooks(
+    port: VaultGrantPort,
+  ): ComputerExecutionHostHooks {
+    return vaultExecutionHooks(this.#vaultReferences, port);
+  }
+
+  /**
+   * What a reference this Computer's gateway intercepted names, only while
+   * the command it was given to is actually live; otherwise nothing.
+   */
+  async admitVaultReference(
+    reference: string,
+  ): Promise<VaultReferenceAdmission | null> {
+    const admission = await this.#vaultReferences.find(reference);
+    if (admission === null) return null;
+    return (await this.executionIsLive(admission.invocationId))
+      ? admission
+      : null;
   }
 
   get #executions(): ComputerExecutionLifecycle {
@@ -1600,7 +1639,7 @@ export class ComputerDO extends ContainerComputer implements ComputerFilesRpc {
     kind: "exec" | "bash" | "hosted",
     budget: ComputerExecutionBudget = genericComputerExecutionBudget,
     signal?: AbortSignal,
-    executionContext?: ComputerValue,
+    requestedContext?: ComputerValue,
     resultOptions?: WorkspaceRuntimeResultOptions,
   ): Promise<ComputerOperationResult> {
     const { requestId, ...command } =
@@ -1612,6 +1651,14 @@ export class ComputerDO extends ContainerComputer implements ComputerFilesRpc {
             command.backend,
             kind === "hosted" ? "hosted" : "exec",
           );
+    // Only a hosted backend's gateway resolves Vault references: a member's
+    // own machine runs the Agent's command as before, with none.
+    const executionContext =
+      requestedContext !== undefined &&
+      isVaultExecutionContext(requestedContext) &&
+      (route === undefined || this.hostedRoute(route.id) === undefined)
+        ? undefined
+        : requestedContext;
     if (executionContext !== undefined) {
       if (route === undefined)
         throw new Error("Host execution requires a hosted native backend");
@@ -2319,6 +2366,16 @@ export {
   type OnBoxVmState,
 } from "./on-box-vm.js";
 export { computerContainerSleepAfterMs } from "./container-policy.js";
+export {
+  isVaultExecutionContext,
+  vaultExecutionContext,
+  withVaultExecution,
+  type VaultGrantPort,
+  type VaultHolder,
+  type VaultReferenceAdmission,
+  type VaultSecretGrant,
+  type VaultSubject,
+} from "./vault-references.js";
 export * from "./computer-backends.js";
 export {
   LocalBackendOfflineError,

@@ -3,9 +3,10 @@
  * and route each outbound request names. Every host's egress gateway decides
  * here and refuses with the same response; a host serves only the lanes it
  * offers (Hub: team, public and its own App Git; standalone Oyster: its own
- * origin's Git) and refuses every other decision.
+ * origin's Git; both: the Vault lane) and refuses every other decision.
  */
 import { z } from "zod";
+import { vaultReferencesIn } from "./vault-references.js";
 
 export type PublicGitRoute = Readonly<{
   readonly host: "github.com" | "gitlab.com" | "codeberg.org";
@@ -15,11 +16,16 @@ export type PublicGitRoute = Readonly<{
 }>;
 
 export type ComputerEgressDecision =
+  /** The request presents one Vault reference; only its owner places a value. */
+  | Readonly<{ kind: "vault"; reference: string }>
   | Readonly<{ kind: "team-git"; route: PublicGitRoute }>
   | Readonly<{ kind: "public" }>
   | Readonly<{ kind: "internal-git" }>
   | Readonly<{ kind: "origin-git" }>
-  | Readonly<{ kind: "denied"; reason: "origin" | "method" | "path" }>;
+  | Readonly<{
+      kind: "denied";
+      reason: "origin" | "method" | "path" | "references";
+    }>;
 
 const publicGitHosts = new Set(["github.com", "gitlab.com", "codeberg.org"]);
 const packageHosts = new Set([
@@ -128,13 +134,55 @@ export type OriginGitHost = Readonly<{
   route(request: Pick<Request, "method">, url: URL): object | null;
 }>;
 
+/** The references one header carries, including inside a Basic credential. */
+function headerReferences(name: string, value: string): readonly string[] {
+  const basic = /^Basic\s+([A-Za-z0-9+/=]+)$/iu.exec(value)?.[1];
+  const decoded =
+    name.toLowerCase() === "authorization" && basic !== undefined
+      ? basicCredential(basic)
+      : "";
+  return [...vaultReferencesIn(value), ...vaultReferencesIn(decoded)];
+}
+
+/** A Basic credential's text; one that is not base64 decodes to nothing, and the raw value is still searched. */
+function basicCredential(encoded: string): string {
+  try {
+    return atob(encoded);
+  } catch {
+    return "";
+  }
+}
+
+/** Every distinct Vault reference in a header value or the URL. */
+function presentedVaultReferences(
+  request: Pick<Request, "headers">,
+  url: URL,
+): readonly string[] {
+  return [
+    ...new Set([
+      ...vaultReferencesIn(url.pathname),
+      ...vaultReferencesIn(url.search),
+      ...[...request.headers].flatMap(([name, value]) =>
+        headerReferences(name, value),
+      ),
+    ]),
+  ];
+}
+
 /** One owner for origin, method and route decisions at Computer egress. */
 export function decideComputerEgress(
-  request: Pick<Request, "method">,
+  request: Pick<Request, "method" | "headers">,
   url: URL,
   host?: OriginGitHost,
 ): ComputerEgressDecision {
   if (!egressHttpsUrl(url)) return { kind: "denied", reason: "origin" };
+
+  // A reference goes to the Vault lane wherever it is sent: an unbound
+  // destination is the owner's refusal to record, never another lane's request.
+  const references = presentedVaultReferences(request, url);
+  const [reference] = references;
+  if (references.length > 1) return { kind: "denied", reason: "references" };
+  if (reference !== undefined) return { kind: "vault", reference };
 
   if (
     url.hostname === "git.team.internal" ||
@@ -279,7 +327,8 @@ export type ComputerEgressEvent = Readonly<{
   event: "computer.egress";
   computerId: string;
   teamId: string | null;
-  lane: "team-git" | "public" | "internal-git" | "origin-git" | "denied";
+  lane:
+    "vault" | "team-git" | "public" | "internal-git" | "origin-git" | "denied";
   host: string;
   method: string;
   status: number;
@@ -334,4 +383,96 @@ export function originGitRequest(request: Request, url: URL): Request {
   if (request.method !== "GET" && request.method !== "HEAD")
     Object.assign(init, { body: request.body, duplex: "half" });
   return new Request(url, init);
+}
+
+/** A Vault lane request as its owner receives it: plain data, sent by the owner. */
+export type VaultRequestData = Readonly<{
+  url: string;
+  method: string;
+  headers: readonly (readonly [string, string])[];
+  body: ArrayBuffer | null;
+}>;
+
+/** The gateway status for an owner's refusal code; the code stays in the log. */
+export function vaultRefusalStatus(code: string): number {
+  switch (code) {
+    case "too_large":
+      return 413;
+    case "rate_limited":
+      return 429;
+    case "invalid_response":
+      return 502;
+    case "unavailable":
+      return 503;
+    default:
+      return 403;
+  }
+}
+
+/**
+ * The guest's request without its reference. Every header that carries the
+ * reference (Basic decoded) and every query parameter that does is removed;
+ * the owner places the value at the secret's own placement. A reference in
+ * the path can be neither removed nor placed, so it is refused, as is a body
+ * above the owner's `bodyLimit`, read no further than that.
+ */
+export async function vaultRequestData(
+  request: Request,
+  url: URL,
+  reference: string,
+  bodyLimit: number,
+): Promise<
+  | Readonly<{ kind: "ready"; data: VaultRequestData }>
+  | Readonly<{ kind: "refused"; reason: "placement" | "too_large" }>
+> {
+  if (url.pathname.includes(reference))
+    return { kind: "refused", reason: "placement" };
+  const target = new URL(url);
+  // Collected first: deleting while iterating URLSearchParams skips entries.
+  const carriers = Array.from(target.searchParams).filter(
+    ([name, value]) => name.includes(reference) || value.includes(reference),
+  );
+  for (const [name] of carriers) target.searchParams.delete(name);
+  const headers = [...request.headers].filter(
+    ([name, value]) => !headerReferences(name, value).includes(reference),
+  );
+  // A GET or HEAD carries no body to send, though the guest's stream may be open.
+  if (
+    request.body === null ||
+    request.method === "GET" ||
+    request.method === "HEAD"
+  )
+    return {
+      kind: "ready",
+      data: { url: target.href, method: request.method, headers, body: null },
+    };
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  const reader = request.body.getReader();
+  for (;;) {
+    const next = await reader.read();
+    if (next.done) break;
+    const chunk = z.instanceof(Uint8Array).parse(next.value);
+    size += chunk.byteLength;
+    if (size > bodyLimit) {
+      await reader.cancel();
+      return { kind: "refused", reason: "too_large" };
+    }
+    chunks.push(chunk);
+  }
+  const body = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return {
+    kind: "ready",
+    data: {
+      url: target.href,
+      method: request.method,
+      headers,
+      body: body.buffer,
+    },
+  };
 }

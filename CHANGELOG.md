@@ -1,5 +1,15 @@
 # @fungi.computer/computer
 
+## 0.15.0
+
+### Minor Changes
+
+- Changes since 0.14.8:
+
+  - fix(computer): report an owner that cannot list an Agent's Vault grants
+  - fix(computer): hand the Vault owner a GET with no body
+  - feat(computer): give Agent commands Vault references and a vault egress lane
+
 ## 0.14.8
 
 ### Patch Changes
