@@ -2359,6 +2359,7 @@ export { computerName, learnComputerName } from "./computer-name.js";
 export {
   OnBoxVmContainerHost,
   OnBoxVmTimeoutError,
+  OnBoxVmUnavailableError,
   onBoxVmPlacement,
   onBoxVmIngress,
   type OnBoxVmEnv,

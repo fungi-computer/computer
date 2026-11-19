@@ -1,5 +1,15 @@
 # @fungi.computer/computer
 
+## 0.16.0
+
+### Minor Changes
+
+- Changes since 0.15.2:
+
+  - fix(hub): send a failed start's reason only to readers that decode it
+  - fix(hub): keep the reason a start failed on the alarm path
+  - feat(computer): export the on-box vm host refusal with its status
+
 ## 0.15.2
 
 ### Patch Changes

@@ -50,10 +50,16 @@ export const computerGrantSchema = z.strictObject({
 export type ComputerGrant = z.output<typeof computerGrantSchema>;
 
 /** State visible without knowing which application hosts the Computer. */
-export const computerStateSchema = z.discriminatedUnion("state", [
-  // start_failed: a queued start ended without running; start again.
+export const computerStateSchema = z.union([
+  z.strictObject({ state: z.enum(["running", "sleeping", "starting"]) }),
+  // An owed start ended without running; start again. `reason` says why
+  // where the reader asked for it or decodes extra keys: released strict
+  // readers, and Hubs from before it, see `start_failed` alone. Two shapes,
+  // not an optional key, keep the state plain JSON.
+  z.strictObject({ state: z.literal("start_failed") }),
   z.strictObject({
-    state: z.enum(["running", "sleeping", "starting", "start_failed"]),
+    state: z.literal("start_failed"),
+    reason: z.string().min(1).max(1_024),
   }),
   z.strictObject({
     state: z.literal("queued"),

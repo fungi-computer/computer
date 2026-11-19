@@ -105,8 +105,13 @@ export function onBoxVmPlacement(
   return host === undefined ? undefined : { hostId, origin: host.origin };
 }
 
-class OnBoxVmUnavailableError extends Error {
-  constructor(operation: string, status: number, detail = "") {
+/** The host service refused an operation; `status` is its HTTP answer. */
+export class OnBoxVmUnavailableError extends Error {
+  constructor(
+    readonly operation: string,
+    readonly status: number,
+    detail = "",
+  ) {
     super(
       `On-box Computer VM ${operation} failed with HTTP ${String(status)}${detail ? `: ${detail}` : ""}`,
     );
