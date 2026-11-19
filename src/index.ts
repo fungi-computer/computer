@@ -1,4 +1,5 @@
 import { boundExecStream } from "./exec-output.js";
+import { portPreviewFailure, portPreviewReply } from "./port-failure.js";
 export type { WorkspaceRuntimeResultOptions } from "@fungi.computer/cloudflare-computer";
 export { createLocalBackendReplayStore } from "./local-backend-replay.js";
 import { computerInternetAccess } from "./internet-access.js";
@@ -1307,16 +1308,10 @@ export class ComputerDO extends ContainerComputer implements ComputerFilesRpc {
           .port(port)
           .fetch(new Request(forwarded, { headers })),
       );
-      const safe = new Response(response.body, response);
-      safe.headers.delete("set-cookie");
-      return safe;
+      return await portPreviewReply(response, request, port);
     } catch (cause) {
       console.error("Computer runtime operation failed", cause);
-
-      return Response.json(
-        { error: "Computer port service is unavailable" },
-        { status: 502 },
-      );
+      return await portPreviewFailure("unreachable", request, port);
     }
   }
 

@@ -181,6 +181,38 @@ test("isolated host routing preserves signed path and query and handles forwardi
         },
       })
     ).status,
-    503,
+    502,
   );
+  // A browser opening the preview reads why, never a blank page.
+  const page = await computerPortPreviewRequest(
+    new Request(request.url, { headers: { "sec-fetch-dest": "document" } }),
+    "ports.test",
+    {
+      ...host,
+      forward: async () => {
+        throw new Error("offline");
+      },
+    },
+  );
+  assert.match(page.headers.get("content-type"), /^text\/html/u);
+  const text = await page.text();
+  // The page escapes its apostrophe as an HTML entity.
+  assert.match(text, /Fungi couldn(?:'|&#39;)t reach this Computer/u);
+  assert.ok(!text.includes("offline"));
+});
+
+test("an expired or unknown preview ticket tells a browser to open the preview again", async (t) => {
+  const f = fixture(t);
+  const reply = await f.preview.dispatchSigned(
+    "a".repeat(20),
+    new Request("http://localhost/", {
+      headers: { "sec-fetch-dest": "document" },
+    }),
+    () => {
+      throw new Error("unexpected forward");
+    },
+  );
+  assert.equal(reply.status, 403);
+  assert.equal(reply.headers.get("cache-control"), "no-store");
+  assert.ok((await reply.text()).includes("This preview link has expired"));
 });

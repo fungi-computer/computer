@@ -2,6 +2,7 @@ import type { WatchdogSqliteOwner } from "@fungi.computer/watchdog";
 import { LONG, nanoid } from "@fungi.computer/cairn";
 import * as Schema from "effect/Schema";
 import * as Option from "effect/Option";
+import { portPreviewFailure } from "./port-failure.js";
 const storedClaimsSchema = Schema.Struct({
   claims: Schema.String,
   expires_at: Schema.Number,
@@ -185,7 +186,8 @@ export class ComputerPortPreview<Selector> {
     ) => Promise<Response>,
   ): Promise<Response> {
     const claims = await this.resolve(signature);
-    if (claims === null) return new Response(null, { status: 403 });
+    // An expired, unknown or altered ticket: the viewer needs a fresh link.
+    if (claims === null) return await portPreviewFailure("expired", request);
     return await forward(claims.selector, claims.port, request);
   }
 
@@ -249,6 +251,6 @@ export async function computerPortPreviewRequest(
     destination.pathname = `/__port_preview/${signature}${destination.pathname}`;
     return await host.forward(computerId, new Request(destination, forwarded));
   } catch {
-    return new Response(null, { status: 503 });
+    return await portPreviewFailure("unreachable", request);
   }
 }

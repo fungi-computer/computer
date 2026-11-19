@@ -1,5 +1,14 @@
 # @fungi.computer/computer
 
+## 0.16.1
+
+### Patch Changes
+
+- Changes since 0.16.0:
+
+  - fix(computer): never read a port refusal header on an upgrade
+  - fix(computer): show a stopped computer's preview as a plain-words page
+
 ## 0.16.0
 
 ### Minor Changes

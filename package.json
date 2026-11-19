@@ -1,6 +1,6 @@
 {
   "name": "@fungi.computer/computer",
-  "version": "0.16.0",
+  "version": "0.16.1",
   "author": "Levi <levi@technomancy.dev>",
   "description": "Cloudflare Computer host for one durable Fungi Computer",
   "type": "module",
@@ -87,6 +87,7 @@
     "esbuild": "0.28.2",
     "eslint": "10.9.1",
     "oxlint": "1.78.0",
+    "playwright": "1.62.1",
     "tsx": "4.23.12",
     "typescript": "5.9.3",
     "uuid": "11.1.1",
