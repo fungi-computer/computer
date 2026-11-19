@@ -865,6 +865,14 @@ export class ComputerDO extends NativeComputerDO {
         ),
       );
     }
+    if (url.pathname === "/test-patch" && request.method === "POST") {
+      return Response.json(
+        await this.applyPatchAfterAcceptance(
+          z.strictObject({ patch: z.string() }).parse(await request.json()),
+          () => undefined,
+        ),
+      );
+    }
     if (url.pathname === "/test-operation" && request.method === "POST") {
       const appMethod = url.searchParams.has("appMethod");
       const abortAfter = z.coerce
@@ -1157,6 +1165,15 @@ export default {
       };
       return await stub.fetch(
         new Request(new URL("/test-process-start", request.url), request),
+      );
+    }
+    if (url.pathname === "/host-patch" && request.method === "POST") {
+      // SAFETY: the fixture's named DO binding reaches its test-only protected host seam.
+      const stub = computer as ComputerRpc & {
+        fetch: (request: Request) => Promise<Response>;
+      };
+      return await stub.fetch(
+        new Request(new URL("/test-patch", request.url), request),
       );
     }
     if (url.pathname === "/call" && request.method === "POST") {
