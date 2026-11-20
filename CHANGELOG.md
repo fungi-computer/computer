@@ -1,5 +1,17 @@
 # @fungi.computer/computer
 
+## 0.16.4
+
+### Patch Changes
+
+- Changes since 0.16.3:
+
+  - perf(computer): import the shell backend without the in-shell commands
+
+- Updated dependencies
+  - @fungi.computer/knapsack@0.4.22
+  - @fungi.computer/computer-contract@0.5.9
+
 ## 0.16.3
 
 ### Patch Changes

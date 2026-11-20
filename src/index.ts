@@ -31,7 +31,7 @@ import {
 import {
   WorkerShellBackend,
   type WorkerShellBackendOptions,
-} from "@fungi.computer/cloudflare-computer/backends/worker-shell";
+} from "@fungi.computer/cloudflare-computer/backends/worker-shell/backend";
 import {
   withWorkspaceContainer,
   type IWorkspaceContainerAPI,
