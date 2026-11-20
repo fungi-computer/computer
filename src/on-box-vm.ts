@@ -110,7 +110,8 @@ export class OnBoxVmUnavailableError extends Error {
   constructor(
     readonly operation: string,
     readonly status: number,
-    detail = "",
+    /** The host's own words, up to 200 characters. */
+    readonly detail = "",
   ) {
     super(
       `On-box Computer VM ${operation} failed with HTTP ${String(status)}${detail ? `: ${detail}` : ""}`,
@@ -185,7 +186,21 @@ const vmStartSchema = z.lazy(() =>
 );
 
 export type OnBoxVmOperation =
-  "status" | "start" | "restart" | "destroy" | "intercept" | "inventory";
+  | "status"
+  | "start"
+  | "restart"
+  | "destroy"
+  | "intercept"
+  | "inventory"
+  | "ssh-certificate";
+
+/** vmd's signed answer: a user certificate for this VM and its per-boot host key. */
+const vmSshCertificateSchema = z.strictObject({
+  certificate: z.string().min(1).max(4_096),
+  serial: z.string().regex(/^\d{1,20}$/u),
+  hostKey: z.string().min(1).max(1_024),
+});
+export type OnBoxVmSshCertificate = z.infer<typeof vmSshCertificateSchema>;
 
 /**
  * vmd's own traffic timer is only a backstop at its maximum: ComputerDO owns
@@ -218,7 +233,8 @@ type VmRequestBody =
       size: ComputerSize;
     }>
   | Readonly<{ host: string; workspace: WorkspaceRef }>
-  | Readonly<{ all: true; token: string; workspace: WorkspaceRef }>;
+  | Readonly<{ all: true; token: string; workspace: WorkspaceRef }>
+  | Readonly<{ publicKey: string; keyId: string }>;
 
 function vmBodyBytes(body: VmRequestBody | undefined): Uint8Array<ArrayBuffer> {
   return new Uint8Array(
@@ -370,6 +386,21 @@ export class OnBoxVmContainerHost implements IWorkspaceContainerAPI {
       all: true,
       token,
       workspace,
+    });
+  }
+
+  /**
+   * Ask the host to sign `publicKey` for this VM's guest sshd. The host signs
+   * only this signed control request, names this VM as the one principal and
+   * returns the VM's per-boot host key; who may ask is the caller's decision.
+   */
+  sshCertificate(input: {
+    publicKey: string;
+    keyId: string;
+  }): Promise<OnBoxVmSshCertificate> {
+    return this.#call("ssh-certificate", vmSshCertificateSchema, {
+      publicKey: input.publicKey,
+      keyId: input.keyId,
     });
   }
 

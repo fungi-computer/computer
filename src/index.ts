@@ -147,6 +147,7 @@ import {
   onBoxVmPlacement,
   type OnBoxVmEnv,
   type OnBoxVmPlacement,
+  type OnBoxVmSshCertificate,
 } from "./on-box-vm.js";
 import { computerKeepAwake } from "./fleet/keep-awake.js";
 import {
@@ -451,6 +452,14 @@ export class ComputerBackendUnavailableError extends Error {
         : "The named Computer backend is not available",
     );
     this.name = "ComputerBackendUnavailableError";
+  }
+}
+
+/** SSH needs a guest sshd behind a host signer, which only an on-box VM has. */
+export class ComputerSshUnavailableError extends Error {
+  constructor() {
+    super("SSH needs a hosted Computer");
+    this.name = "ComputerSshUnavailableError";
   }
 }
 
@@ -2285,7 +2294,60 @@ export class ComputerDO extends ContainerComputer implements ComputerFilesRpc {
         { status: 400 },
       );
     }
+    return await this.#terminalServerUpgrade(request, accept, async () => {
+      const target = new URL("http://localhost/pty");
+      target.search = new URLSearchParams({
+        ...(await this.terminalDisplayEnvironment()),
+        session: await sha256(
+          JSON.stringify([principalKey, query.data.session]),
+        ),
+        cols: String(query.data.cols),
+        rows: String(query.data.rows),
+      }).toString();
+      return target;
+    });
+  }
 
+  /**
+   * Relay one authorized SSH transport to the guest terminal server's `/ssh`
+   * upgrade, which runs one `sshd -i` per connection as the runtime user. The
+   * SSH stream rides the WebSocket's binary frames; sshd authenticates it.
+   */
+  protected async sshAfterAcceptance(
+    request: Request,
+    accept: () => void,
+  ): Promise<Response> {
+    if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket")
+      return new Response("Expected WebSocket upgrade", { status: 426 });
+    return await this.#terminalServerUpgrade(request, accept, () =>
+      Promise.resolve(new URL("http://localhost/ssh")),
+    );
+  }
+
+  /**
+   * Ask this Computer's VM host to sign `publicKey` for its guest sshd. The
+   * caller decided who may; the host names this VM as the only principal.
+   */
+  protected async sshCertificateAfterAcceptance(
+    input: Readonly<{ publicKey: string; keyId: string }>,
+    accept: () => void,
+  ): Promise<OnBoxVmSshCertificate & { principal: string }> {
+    const hosted = this.hostedRoute();
+    if (hosted?.backing.kind !== "on-box-vm")
+      throw new ComputerSshUnavailableError();
+    accept();
+    const signed = await this.onBoxVmHost(hosted.backing.hostId).sshCertificate(
+      input,
+    );
+    return { ...signed, principal: this.state.id.toString() };
+  }
+
+  /** The hosted terminal server's upgrade, once the runtime answers a probe. */
+  async #terminalServerUpgrade(
+    request: Request,
+    accept: () => void,
+    target: () => Promise<URL>,
+  ): Promise<Response> {
     const hosted = this.hostedRoute();
     if (hosted === undefined)
       return Response.json(
@@ -2319,19 +2381,11 @@ export class ComputerDO extends ContainerComputer implements ComputerFilesRpc {
     accept();
 
     try {
-      const target = new URL("http://localhost/pty");
-      target.search = new URLSearchParams({
-        ...(await this.terminalDisplayEnvironment()),
-        session: await sha256(
-          JSON.stringify([principalKey, query.data.session]),
-        ),
-        cols: String(query.data.cols),
-        rows: String(query.data.rows),
-      }).toString();
+      const url = await target();
       const response = await this.withHostedResponse(hosted.backing, () =>
         this.hostedContainerHost(hosted.backing)
           .port(computerTerminalPort)
-          .fetch(new Request(target, request)),
+          .fetch(new Request(url, request)),
       );
       if (response.status === 101) this.#startTerminalSync(hosted.backing);
       return response;
@@ -2418,6 +2472,7 @@ export {
   onBoxVmIngress,
   type OnBoxVmEnv,
   type OnBoxVmOperation,
+  type OnBoxVmSshCertificate,
   type OnBoxVmState,
 } from "./on-box-vm.js";
 export { computerContainerSleepAfterMs } from "./container-policy.js";

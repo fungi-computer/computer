@@ -77,6 +77,19 @@ test(
   { timeout: 10_000 },
   async (t) => {
     const nativeFetch = globalThis.fetch;
+    // Mocked once: a second mock of the same method would outlive this test.
+    let controller = new globalThis.AbortController();
+    t.mock.method(globalThis.AbortSignal, "timeout", () => controller.signal);
+    t.mock.method(globalThis, "fetch", async (...args) => {
+      const response = await nativeFetch(...args);
+      controller.abort(
+        new globalThis.DOMException(
+          "Host request deadline expired",
+          "TimeoutError",
+        ),
+      );
+      return response;
+    });
     for (const status of [200, 503]) {
       const server = createServer((_request, response) => {
         response.writeHead(status, { "content-type": "application/json" });
@@ -98,18 +111,7 @@ test(
         env,
         "a".repeat(64),
       );
-      const controller = new globalThis.AbortController();
-      t.mock.method(globalThis.AbortSignal, "timeout", () => controller.signal);
-      t.mock.method(globalThis, "fetch", async (...args) => {
-        const response = await nativeFetch(...args);
-        controller.abort(
-          new globalThis.DOMException(
-            "Host request deadline expired",
-            "TimeoutError",
-          ),
-        );
-        return response;
-      });
+      controller = new globalThis.AbortController();
       await assert.rejects(local.state(), (cause) => {
         assert.equal(cause._tag, "OnBoxVmTimeoutError");
         assert.equal(cause.operation, "status");
@@ -141,6 +143,47 @@ test("a VM boots with vmd's sleep timer at its maximum and the Computer's size",
     { env: {}, enableInternet: false, sleepAfterMs: 86_400_000, size: "large" },
     { env: {}, enableInternet: false, sleepAfterMs: 86_400_000, size: "small" },
   ]);
+});
+
+test("an SSH certificate is a signed POST for this VM, and a host refusal keeps its words", async (t) => {
+  const calls = [];
+  const certificate = {
+    certificate: "ssh-ed25519-cert-v01@openssh.com AAAAcert",
+    serial: "42",
+    hostKey: "ssh-ed25519 AAAAhost",
+  };
+  let reply = globalThis.Response.json(certificate);
+  t.mock.method(globalThis, "fetch", async (url, init) => {
+    calls.push({
+      url,
+      method: init.method,
+      signed: new globalThis.Headers(init.headers).has(seamHeader),
+      body: JSON.parse(new globalThis.TextDecoder().decode(init.body)),
+    });
+    return reply;
+  });
+  const input = {
+    publicKey: "ssh-ed25519 AAAAuser",
+    keyId: "user:u team:t computer:c login:l",
+  };
+  assert.deepEqual(await host.sshCertificate(input), certificate);
+  assert.deepEqual(calls, [
+    {
+      url: `https://box.example/vms/${"a".repeat(64)}/ssh-certificate`,
+      method: "POST",
+      signed: true,
+      body: input,
+    },
+  ]);
+  reply = globalThis.Response.json(
+    { error: "SSH certificates disabled: CA unreadable at /etc/x: missing" },
+    { status: 503 },
+  );
+  await assert.rejects(host.sshCertificate(input), (cause) => {
+    assert.equal(cause.status, 503);
+    assert.match(cause.detail, /SSH certificates disabled/u);
+    return true;
+  });
 });
 
 test("a host built to read and stop VMs cannot boot one", async (t) => {
