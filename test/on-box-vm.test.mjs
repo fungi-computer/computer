@@ -61,6 +61,26 @@ test("host refusal and network failure are not relabeled as timeouts", async (t)
   await assert.rejects(host.destroy(), (cause) => cause === offline);
 });
 
+test("a host refusal carries its typed code, and an untyped one carries none", async (t) => {
+  t.mock.method(globalThis, "fetch", async () =>
+    globalThis.Response.json(
+      { error: "scratch pool is low", code: "scratch_capacity" },
+      { status: 503 },
+    ),
+  );
+  await assert.rejects(host.state(), (cause) => {
+    assert.equal(cause.name, "OnBoxVmUnavailableError");
+    assert.equal(cause.hostCode, "scratch_capacity");
+    return true;
+  });
+  t.mock.method(
+    globalThis,
+    "fetch",
+    async () => new globalThis.Response("host unavailable", { status: 503 }),
+  );
+  await assert.rejects(host.state(), (cause) => cause.hostCode === null);
+});
+
 test("inventory uses the same deadline and preserves its host-wide signed GET", async (t) => {
   t.mock.method(globalThis, "fetch", async (url, init) => {
     assert.equal(url, "https://box.example/vms");

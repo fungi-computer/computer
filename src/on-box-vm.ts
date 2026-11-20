@@ -5,6 +5,8 @@ import type {
 import { z } from "zod";
 import { computerSizeSchema, type ComputerSize } from "./computer-backends.js";
 import * as Data from "effect/Data";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import {
   SeamReplayPartitions,
   importSeamSigner,
@@ -107,6 +109,8 @@ export function onBoxVmPlacement(
 
 /** The host service refused an operation; `status` is its HTTP answer. */
 export class OnBoxVmUnavailableError extends Error {
+  /** The host's typed refusal, such as `scratch_capacity`; null when it names none. */
+  readonly hostCode: string | null;
   constructor(
     readonly operation: string,
     readonly status: number,
@@ -117,6 +121,10 @@ export class OnBoxVmUnavailableError extends Error {
       `On-box Computer VM ${operation} failed with HTTP ${String(status)}${detail ? `: ${detail}` : ""}`,
     );
     this.name = "OnBoxVmUnavailableError";
+    const body = Schema.decodeUnknownOption(
+      Schema.fromJsonString(Schema.Struct({ code: Schema.String })),
+    )(detail);
+    this.hostCode = Option.isSome(body) ? body.value.code : null;
   }
 }
 
@@ -307,7 +315,7 @@ export class OnBoxVmContainerHost implements IWorkspaceContainerAPI {
         signal,
       });
       if (!response.ok) {
-        const detail = (await response.text()).slice(0, 200);
+        const detail = (await response.text()).slice(0, 400);
         throw new OnBoxVmUnavailableError(operation, response.status, detail);
       }
       return schema.parse(await response.json());

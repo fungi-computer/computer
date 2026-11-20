@@ -1,5 +1,13 @@
 # @fungi.computer/computer
 
+## 0.16.3
+
+### Patch Changes
+
+- Changes since 0.16.2:
+
+  - fix(hub): say a low host disk plainly when a Computer start is refused
+
 ## 0.16.2
 
 ### Patch Changes

@@ -38,7 +38,8 @@ FROM node:24.20.0-trixie-slim@sha256:a747ad80c8a161b650d79a6da9c422005b91148b18b
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
-    fuse3 libfuse2t64 ca-certificates curl git procps tini \
+    fuse3 libfuse2t64 ca-certificates curl git procps tini openssh-server \
+  && rm -f /etc/ssh/ssh_host_* \
   && rm -rf /var/lib/apt/lists/*
 
 RUN npm install --global --no-fund --no-audit pnpm@11.24.0 \
@@ -59,12 +60,15 @@ COPY dist/apply-patch/LICENSE.codex /opt/fungi/fungi-apply-patch.LICENSE
 COPY --from=terminal /opt/fungi/node_modules /opt/fungi/node_modules
 COPY container/runtime-privileges.mjs /opt/fungi/
 COPY --from=terminal /opt/fungi/runtime-privileges.node /opt/fungi/
-COPY container/package.json container/computer-init.mjs container/computer-start.sh container/resource-bounds.mjs container/terminal-server.mjs container/terminal-runtime.mjs container/terminal-protocol.mjs /opt/fungi/
+COPY container/package.json container/computer-init.mjs container/computer-start.sh container/resource-bounds.mjs container/terminal-server.mjs container/terminal-runtime.mjs container/terminal-protocol.mjs container/sshd_config /opt/fungi/
 COPY container/terminal-assets/bashrc container/terminal-assets/git-prompt.sh container/terminal-assets/global-tools.sh /opt/fungi/terminal-assets/
 RUN chmod -R a+rX /opt/fungi \
   && printf '\n. /opt/fungi/terminal-assets/bashrc\n' >> /etc/bash.bashrc \
   && printf '. /opt/fungi/terminal-assets/global-tools.sh\n. /opt/fungi/terminal-assets/bashrc\n' > /etc/profile.d/fungi-terminal.sh
 
+# openssh-server is installed only for `sshd -i`, which terminal-server.mjs runs
+# as the runtime user for one admitted connection. No sshd service starts, and no
+# host key ships in the image: vmd supplies each VM's key at boot.
 # No customer process can invoke a setuid/setgid helper, including fusermount.
 # FUSE is mounted while init is root, before either runtime listener opens.
 RUN find / -xdev -perm /6000 -exec chmod a-s {} +

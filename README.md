@@ -273,6 +273,7 @@ were saved in a hosted Computer. Do not copy its temporary output into source.
 checks native workspace operations and reconstruction.
 [Process proof](test/process-proof.mjs) checks retained process identity against
 the real container. [Terminal proof](test/terminal-container-proof.mjs),
+[SSH proof](test/ssh-container-proof.mjs) (the guest `sshd -i` behind `/ssh`),
 [resource proof](test/container-resource-proof.mjs) and
 [backend tests](test/computer-backends.test.mjs) cover their separate
 boundaries. The declared nightly egress proof is separate from the ordinary

@@ -11,6 +11,7 @@
     "package/container/resource-bounds.mjs",
     "package/container/runtime-privileges.cc",
     "package/container/runtime-privileges.mjs",
+    "package/container/sshd_config",
     "package/container/terminal-assets/README.md",
     "package/container/terminal-assets/bashrc",
     "package/container/terminal-assets/git-prompt.sh",

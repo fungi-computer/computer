@@ -21,6 +21,19 @@ mkdir -p /workspace
 chown "$uid:$uid" /workspace
 ulimit -Su "$pids_max"
 ulimit -Hu "$pids_max"
+# vmd's guest config carries this VM's SSH host key, user CA and principals. The
+# unprivileged `sshd -i` reads them from files only the runtime user can read; a
+# Computer without them has no SSH, and terminal-server refuses /ssh.
+ssh_source=/run/fungi-vm/ssh
+ssh_directory=/run/fungi-ssh
+rm -rf "$ssh_directory"
+if [[ -d "$ssh_source" ]]; then
+  install -d -m 0700 -o "$uid" -g "$uid" "$ssh_directory"
+  for name in host_ed25519 user_ca.pub principals; do
+    [[ -f "$ssh_source/$name" ]] || continue
+    install -m 0600 -o "$uid" -g "$uid" "$ssh_source/$name" "$ssh_directory/$name"
+  done
+fi
 export HOME=/workspace
 # The image's npm and pnpm prefixes are root-owned. Global installs go into
 # user-owned folders in the persistent home; npm and pnpm create them on first

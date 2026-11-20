@@ -1,0 +1,38 @@
+# The Computer's guest sshd, run only as `sshd -i` by terminal-server.mjs for one
+# Hub-admitted WebSocket at a time, as the unprivileged runtime user. It has no
+# listening socket. A user is admitted only by an OpenSSH certificate signed by
+# the host's CA whose principal is this VM's id; there are no other credentials.
+# vmd writes the files below into the guest at boot; computer-start.sh copies
+# them to files the runtime user owns.
+HostKey /run/fungi-ssh/host_ed25519
+TrustedUserCAKeys /run/fungi-ssh/user_ca.pub
+AuthorizedPrincipalsFile /run/fungi-ssh/principals
+
+# Authentication
+AuthorizedKeysFile none
+AuthenticationMethods publickey
+PubkeyAuthentication yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitEmptyPasswords no
+PermitRootLogin no
+UsePAM no
+StrictModes yes
+AllowUsers fungi
+
+# Forwarding: listeners stay on the guest's own loopback
+GatewayPorts no
+AllowAgentForwarding no
+AllowStreamLocalForwarding no
+PermitTunnel no
+X11Forwarding no
+
+# Nothing the user or the client can set changes the login
+PermitUserRC no
+PermitUserEnvironment no
+PrintMotd no
+PidFile none
+LogLevel VERBOSE
+
+# scp and sftp clients use the SFTP protocol
+Subsystem sftp internal-sftp
