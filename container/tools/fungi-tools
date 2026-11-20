@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -u
+# Locks are runtime scratch, not durable leases. flock releases the lock on
+# exit or cancellation; all downloads and installed tools belong to HOME.
+# The runtime already gives each Computer its own UID and /tmp. Keep the
+# lock file private and stable across competing installer processes.
+umask 077
+flock --nonblock --conflict-exit-code 75 "/tmp/fungi-tools-$UID.lock" \
+  node /opt/fungi/tools/cli.mjs "$@"
+status=$?
+if [[ $status == 75 ]]; then
+  printf '%s\n' 'fungi-tools: busy: another install is running; retry after it finishes.' >&2
+fi
+exit "$status"

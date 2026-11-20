@@ -4,6 +4,10 @@
 # resolve in login shells too, interactive or not.
 [ -n "${NPM_CONFIG_PREFIX:-}" ] || return 0
 case ":$PATH:" in
+  *":$HOME/.local/bin:"*) ;;
+  *) PATH="$HOME/.local/bin:$PATH" ;;
+esac
+case ":$PATH:" in
   *":$NPM_CONFIG_PREFIX/bin:"*) ;;
   *) PATH="$NPM_CONFIG_PREFIX/bin:${PNPM_HOME:+$PNPM_HOME/bin:}$PATH" ;;
 esac

@@ -11,7 +11,8 @@ RUN pnpm install --frozen-lockfile --prod --config.node-linker=hoisted \
   && mv build/Release/pty.node /tmp/pty.node \
   && rm -rf build deps third_party src scripts typings prebuilds node-addon-api \
   && mkdir -p build/Release \
-  && mv /tmp/pty.node build/Release/pty.node
+  && mv /tmp/pty.node build/Release/pty.node \
+  && chmod -R a+rX /opt/fungi/node_modules
 
 COPY container/runtime-privileges.cc ./
 RUN g++ -shared -fPIC -I/usr/local/include/node runtime-privileges.cc -o runtime-privileges.node
@@ -33,12 +34,23 @@ RUN toolchain="$(node --input-type=module --eval "import { codexPatchPin } from 
 COPY dist/apply-patch/ /source/
 RUN node /source/compile.mjs --out /out --scratch /scratch
 
+# Only uv ships by default; fungi-tools installs optional pinned tools at first use.
+FROM node:24.20.0-trixie-slim@sha256:a747ad80c8a161b650d79a6da9c422005b91148b18b8d2c669eb5a0b7c07e600 AS tools
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl xz-utils \
+  && rm -rf /var/lib/apt/lists/*
+WORKDIR /tmp/downloads
+RUN curl -fLSs https://github.com/astral-sh/uv/releases/download/0.13.8/uv-x86_64-unknown-linux-gnu.tar.gz -o uv.tar.gz \
+  && echo '5acfd9177cfecf0bf87578f059728215ccc884388988f55f7a65041b57387d91  uv.tar.gz' | sha256sum -c - \
+  && mkdir -p /opt/toolchains/uv && tar -xzf uv.tar.gz -C /opt/toolchains/uv --strip-components=1 \
+  && chmod -R a+rX /opt/toolchains
+
 # Match the repository toolchain on the same Linux x64 target as computerd.
 FROM node:24.20.0-trixie-slim@sha256:a747ad80c8a161b650d79a6da9c422005b91148b18b8d2c669eb5a0b7c07e600
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
-    fuse3 libfuse2t64 ca-certificates curl git procps tini openssh-server \
+    fuse3 libfuse2t64 ca-certificates curl git procps s6 tini openssh-server \
+    python3 python3-venv gcc libc6-dev gh ripgrep xz-utils \
   && rm -f /etc/ssh/ssh_host_* \
   && rm -rf /var/lib/apt/lists/*
 
@@ -57,10 +69,15 @@ COPY dist/computerd.cjs dist/team-candidate-builder.mjs /opt/fungi/
 COPY --from=apply-patch --chmod=755 /out/fungi-apply-patch /opt/fungi/fungi-apply-patch
 COPY --from=apply-patch /out/build.json /opt/fungi/fungi-apply-patch.notices.json
 COPY dist/apply-patch/LICENSE.codex /opt/fungi/fungi-apply-patch.LICENSE
-COPY --from=terminal /opt/fungi/node_modules /opt/fungi/node_modules
+COPY --from=tools /opt/toolchains /opt/toolchains
+RUN ln -s /opt/toolchains/uv/uv /opt/toolchains/uv/uvx /usr/local/bin/
+COPY container/tools/ /opt/fungi/tools/
+COPY --chmod=755 container/tools/fungi-tools /usr/local/bin/fungi-tools
+COPY --chmod=755 container/fungi-services /usr/local/bin/fungi-services
 COPY container/runtime-privileges.mjs /opt/fungi/
 COPY --from=terminal /opt/fungi/runtime-privileges.node /opt/fungi/
-COPY container/package.json container/computer-init.mjs container/computer-start.sh container/resource-bounds.mjs container/terminal-server.mjs container/terminal-runtime.mjs container/terminal-protocol.mjs container/sshd_config /opt/fungi/
+COPY --from=terminal /opt/fungi/node_modules /opt/fungi/node_modules
+COPY container/package.json container/computer-init.mjs container/computer-start.sh container/fungi-services.mjs container/services-render.mjs container/resource-bounds.mjs container/terminal-server.mjs container/terminal-runtime.mjs container/terminal-protocol.mjs container/sshd_config /opt/fungi/
 COPY container/terminal-assets/bashrc container/terminal-assets/git-prompt.sh container/terminal-assets/global-tools.sh /opt/fungi/terminal-assets/
 RUN chmod -R a+rX /opt/fungi \
   && printf '\n. /opt/fungi/terminal-assets/bashrc\n' >> /etc/bash.bashrc \

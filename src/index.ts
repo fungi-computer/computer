@@ -109,6 +109,9 @@ import {
   processStartInputSchema,
   processStartToolInputSchema,
   ComputerProcessNotFoundError,
+  computerServiceDeclarationSchema,
+  serviceLogsInputSchema,
+  serviceNameInputSchema,
   type ComputerProcess,
   type ComputerProcessId,
   type ComputerProcessSync,
@@ -136,6 +139,17 @@ import {
   type ProcessRuntime,
   waitForProcessExit,
 } from "./process-inventory.js";
+import { ComputerServiceInventory } from "./services.js";
+import { applyDeclaredServices } from "./services-apply.js";
+import {
+  declareService,
+  listServices,
+  removeService,
+  restartService,
+  serviceLogs,
+  setServiceEnabled,
+  type ServicesRuntime,
+} from "./services-tools.js";
 import {
   assertComputerContainersEnabled,
   ComputerContainersPausedError,
@@ -645,6 +659,11 @@ class ContainerComputer extends ContainerComputerBase {
     void start;
   }
 
+  /** Work every runtime start owes the Computer itself, apart from owners' metering. */
+  protected hostedRuntimeStarted(backing: HostedBacking): void {
+    void backing;
+  }
+
   /** The single routing decision over this Computer's attached backends. */
   protected routeBackend(
     backend: string | undefined,
@@ -711,6 +730,7 @@ class ContainerComputer extends ContainerComputerBase {
       () => this.computerSize(),
       (start) => {
         this.containerRuntimeStarted(start);
+        this.hostedRuntimeStarted(start.backing);
       },
     );
   }
@@ -963,6 +983,162 @@ export class ComputerDO extends ContainerComputer implements ComputerFilesRpc {
   #vaultReferenceRecord: ComputerVaultReferences | undefined;
   readonly #processStarts = new Map<string, PendingProcessStart>();
   #terminalSync: Promise<void> | undefined;
+
+  #serviceRecord: ComputerServiceInventory | undefined;
+  #servicesApplied: Promise<void> = Promise.resolve();
+
+  /**
+   * The declared services. The process inventory is built first because it
+   * owns the exposed-port table a service port is admitted through.
+   */
+  protected get services(): ComputerServiceInventory {
+    void this.#processes;
+    this.#serviceRecord ??= new ComputerServiceInventory(
+      this.state.storage,
+      () => Date.now(),
+    );
+    return this.#serviceRecord;
+  }
+
+  /**
+   * Every runtime start (a wake, a recycle's replacement, a bump) brings the
+   * declared services back. One apply runs at a time, in start order; a
+   * failure is logged with its cause and leaves the next start to try again.
+   */
+  /** The declared services' view of this Computer: awake or not, and a command run on it. */
+  #servicesRuntime(backend?: string): ServicesRuntime {
+    return {
+      awake: async () => {
+        const route = this.hostedRoute();
+        return (
+          route !== undefined && (await this.containerRunning(route.backing))
+        );
+      },
+      run: async (command) => {
+        const target = backend ?? this.requireHostedRoute().id;
+        const workspace = await this.readyWorkspace();
+        using run = await workspace.runtime.exec(command, {
+          backend: target,
+          encoding: "utf8",
+          timeoutMs: 30_000,
+        });
+        const { status, exitCode, stdout, stderr } = await run.result();
+        return { status, exitCode, stdout, stderr };
+      },
+    };
+  }
+
+  /**
+   * Everything that renders or controls the services runs here, one at a time
+   * in arrival order, and reads the declarations only when its turn comes. A
+   * wake's apply and a tool's apply therefore never race: the later one always
+   * carries the newer declarations.
+   */
+  #serialServices<T>(work: () => Promise<T>): Promise<T> {
+    const turn = this.#servicesApplied.then(work);
+    this.#servicesApplied = turn.then(
+      () => undefined,
+      () => undefined,
+    );
+    return turn;
+  }
+
+  protected override hostedRuntimeStarted(backing: HostedBacking): void {
+    const runtime = this.#servicesRuntime(attachedBackendId(backing));
+    const applied = this.#serialServices(async () => {
+      try {
+        await applyDeclaredServices({
+          inventory: this.services,
+          run: runtime.run,
+        });
+      } catch (cause) {
+        Effect.runSync(
+          Effect.logError(
+            "Computer declared services were not applied",
+            Redacted.make(cause),
+          ),
+        );
+      }
+    });
+    this.state.waitUntil(applied);
+  }
+
+  /** The Agent tools for declared services, once the host accepts the call. */
+  async serviceToolAfterAcceptance(
+    tool: string,
+    input: ComputerValue,
+    accept: () => void,
+  ): Promise<ComputerValue> {
+    accept();
+    return await this.#serialServices(() => this.#serviceTool(tool, input));
+  }
+
+  async #serviceTool(
+    tool: string,
+    input: ComputerValue,
+  ): Promise<ComputerValue> {
+    const runtime = this.#servicesRuntime();
+    const inventory = this.services;
+    switch (tool) {
+      case "declare_service":
+        return computerValueSchema.parse(
+          await declareService(
+            inventory,
+            runtime,
+            computerServiceDeclarationSchema.parse(input),
+            "agent",
+          ),
+        );
+      case "list_services":
+        return computerValueSchema.parse(
+          await listServices(inventory, runtime),
+        );
+      case "service_logs":
+        return computerValueSchema.parse(
+          await serviceLogs(
+            inventory,
+            runtime,
+            serviceLogsInputSchema.parse(input),
+          ),
+        );
+      case "stop_service":
+        return computerValueSchema.parse(
+          await setServiceEnabled(
+            inventory,
+            runtime,
+            serviceNameInputSchema.parse(input).name,
+            false,
+          ),
+        );
+      case "start_service":
+        return computerValueSchema.parse(
+          await setServiceEnabled(
+            inventory,
+            runtime,
+            serviceNameInputSchema.parse(input).name,
+            true,
+          ),
+        );
+      case "restart_service":
+        return computerValueSchema.parse(
+          await restartService(
+            inventory,
+            runtime,
+            serviceNameInputSchema.parse(input).name,
+          ),
+        );
+      case "remove_service":
+        return computerValueSchema.parse(
+          await removeService(
+            inventory,
+            runtime,
+            serviceNameInputSchema.parse(input).name,
+          ),
+        );
+      default:
+        throw new Error(`Computer capability is unavailable: ${tool}`);
+    }
+  }
 
   get #processes(): ComputerProcessInventory {
     this.#processRecord ??= new ComputerProcessInventory(
@@ -1646,6 +1822,14 @@ export class ComputerDO extends ContainerComputer implements ComputerFilesRpc {
         return this.processLogsAfterAcceptance(input, accept);
       case "wait_process":
         return await this.waitProcessAfterAcceptance(input, accept);
+      case "declare_service":
+      case "list_services":
+      case "service_logs":
+      case "stop_service":
+      case "start_service":
+      case "restart_service":
+      case "remove_service":
+        return await this.serviceToolAfterAcceptance(selected, input, accept);
     }
     await this.prepareFiles();
     const workspace = await this.readyWorkspace();

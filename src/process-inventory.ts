@@ -8,11 +8,6 @@ import {
   processStartInputSchema,
   mintComputerProcessId,
   ComputerProcessLimitError,
-  ComputerPortReservedError,
-  ComputerPortConflictError,
-  ComputerPortLimitError,
-  isComputerReservedPort,
-  maximumExposedPorts,
   maximumProcessLogLineCharacters,
   maximumProcessLogLines,
   maximumProcessRecords,
@@ -23,6 +18,11 @@ import {
 } from "@fungi.computer/computer-contract";
 import { ComputerOperationConflictError } from "./operation-record.js";
 import { initializePortAccess } from "./port-access.js";
+import {
+  claimPort,
+  createExposedPorts,
+  releasePortsOwnedBy,
+} from "./port-ownership.js";
 
 /** The durable SQLite surface owned by processes and their port exposures. */
 export type ComputerProcessStorage = Pick<
@@ -188,9 +188,7 @@ export class ComputerProcessInventory {
       storage.sql.exec(
         "CREATE TABLE IF NOT EXISTS computer_processes (id TEXT PRIMARY KEY, request_scope TEXT NOT NULL, request_id TEXT NOT NULL, input_hash TEXT NOT NULL, backend TEXT NOT NULL, command TEXT NOT NULL, cwd TEXT, port INTEGER, state TEXT NOT NULL CHECK (state IN ('running','exited')), exit_code INTEGER, sync TEXT NOT NULL DEFAULT 'unknown' CHECK (sync IN ('synced','pending','unknown')), started_at INTEGER NOT NULL, ended_at INTEGER, ended_reason TEXT CHECK (ended_reason IN ('idle-sleep')), log_tail TEXT NOT NULL DEFAULT '', log_truncated INTEGER NOT NULL DEFAULT 0, CHECK ((state = 'running') = (ended_at IS NULL)), UNIQUE(request_scope, request_id)) STRICT",
       );
-      storage.sql.exec(
-        "CREATE TABLE IF NOT EXISTS computer_exposed_ports (port INTEGER PRIMARY KEY CHECK (port BETWEEN 1 AND 65535), process_id TEXT) STRICT",
-      );
+      createExposedPorts(storage);
       initializePortAccess(storage);
     });
   }
@@ -248,32 +246,7 @@ export class ComputerProcessInventory {
       if (running >= maximumRunningProcesses)
         throw new ComputerProcessLimitError();
       const id = mintComputerProcessId();
-      if (input.port !== undefined) {
-        if (isComputerReservedPort(input.port))
-          throw new ComputerPortReservedError(input.port);
-        const exposure = this.#storage.sql
-          .exec<{ process_id: string | null }>(
-            "SELECT process_id FROM computer_exposed_ports WHERE port = ?",
-            input.port,
-          )
-          .toArray()[0];
-        if (exposure !== undefined && exposure.process_id !== null)
-          throw new ComputerPortConflictError();
-        if (exposure === undefined) {
-          const ports =
-            this.#storage.sql
-              .exec<{ count: number }>(
-                "SELECT COUNT(*) AS count FROM computer_exposed_ports",
-              )
-              .toArray()[0]?.count ?? maximumExposedPorts;
-          if (ports >= maximumExposedPorts) throw new ComputerPortLimitError();
-          this.#storage.sql.exec(
-            "INSERT INTO computer_exposed_ports (port, process_id) VALUES (?, ?)",
-            input.port,
-            id,
-          );
-        }
-      }
+      if (input.port !== undefined) claimPort(this.#storage, input.port, id);
       this.#storage.sql.exec(
         "INSERT INTO computer_processes (id, request_scope, request_id, input_hash, backend, command, cwd, port, state, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'running', ?)",
         id,
@@ -319,10 +292,7 @@ export class ComputerProcessInventory {
         this.#now(),
         id,
       );
-      this.#storage.sql.exec(
-        "DELETE FROM computer_exposed_ports WHERE process_id = ?",
-        id,
-      );
+      releasePortsOwnedBy(this.#storage, id);
       return this.#require(id);
     });
   }
@@ -345,11 +315,7 @@ export class ComputerProcessInventory {
         this.#now(),
         backend,
       );
-      for (const { id } of ids)
-        this.#storage.sql.exec(
-          "DELETE FROM computer_exposed_ports WHERE process_id = ?",
-          id,
-        );
+      for (const { id } of ids) releasePortsOwnedBy(this.#storage, id);
     });
   }
   /** Replace the retained output tail of one process, if its record is still kept. */

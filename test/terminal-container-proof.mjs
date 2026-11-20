@@ -9,6 +9,8 @@ import { execFile } from "node:child_process";
 import process from "node:process";
 import { promisify } from "node:util";
 import { proofImage } from "./proof-image.mjs";
+import { proveInstalledTools } from "./installed-tools-proof.mjs";
+import { proveServices } from "./services-container-proof.mjs";
 
 const run = promisify(execFile);
 const image = await proofImage();
@@ -69,6 +71,9 @@ const container = (
   await docker(
     "run",
     "-d",
+    ...(process.env.COMPUTER_PROOF_NETWORK
+      ? ["--network", process.env.COMPUTER_PROOF_NETWORK]
+      : []),
     ...(process.env.COMPUTER_PROOF_FUSE === "1"
       ? [
           "--device",
@@ -135,6 +140,13 @@ async function runProof() {
   );
   await until(first, "PRIVILEGE_DENIED");
   assert.ok(!first.text.includes("PRIVILEGE_GAINED"));
+  await proveInstalledTools(container);
+  await proveServices(container);
+  type(
+    first,
+    "bash -c 'set -e; for tool in python3 uv go rustc cargo gh rg claude codex opencode pi; do command -v $tool >/dev/null; done; echo TOOLS_$((6*7))'\n",
+  );
+  await until(first, "TOOLS_42");
   // Global installs land in the user-owned home, not the root-owned image
   // prefix. The login shell and a non-interactive `bash -c` (the agent path:
   // every child of computerd or the terminal inherits the same environment)
@@ -277,6 +289,7 @@ async function runProof() {
 
   return `${JSON.stringify({
     proof: "computer-terminal-container",
+    image,
     resized: "40x120",
     replayedAfterDrop: true,
     ticksWhileDetached: lastReplayed,

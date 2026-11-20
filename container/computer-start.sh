@@ -19,6 +19,13 @@ export COMPUTER_RUNTIME_UID="$uid"
 pids_max=$(node --input-type=module -e 'import { computerResourceBounds } from "/opt/fungi/resource-bounds.mjs"; process.stdout.write(String(computerResourceBounds.pidsMax))')
 mkdir -p /workspace
 chown "$uid:$uid" /workspace
+# Agent CLIs installed by fungi-tools live here, outside the synced home: their
+# binaries exceed the durable home's per-file bound. Nothing here survives a wake.
+install -d -m 0700 -o "$uid" -g "$uid" /var/cache/fungi-tools
+# The declared services' s6 scan directory and logs: scratch, rebuilt by
+# `fungi-services apply` on every wake, never synced into the home.
+export COMPUTER_SERVICES_DIR=/var/cache/fungi-services
+install -d -m 0700 -o "$uid" -g "$uid" "$COMPUTER_SERVICES_DIR"
 ulimit -Su "$pids_max"
 ulimit -Hu "$pids_max"
 # vmd's guest config carries this VM's SSH host key, user CA and principals. The
@@ -43,5 +50,5 @@ export HOME=/workspace
 # /etc/profile resets PATH.
 export NPM_CONFIG_PREFIX="$HOME/.npm-global"
 export PNPM_HOME="$HOME/.local/share/pnpm"
-export PATH="$NPM_CONFIG_PREFIX/bin:$PNPM_HOME/bin:$PATH"
+export PATH="$HOME/.local/bin:$NPM_CONFIG_PREFIX/bin:$PNPM_HOME/bin:$PATH"
 exec node /opt/fungi/computer-init.mjs

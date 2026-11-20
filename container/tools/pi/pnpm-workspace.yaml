@@ -1,0 +1,4 @@
+# Standalone frozen dependency closure, installed only by fungi-tools.
+allowBuilds:
+  "@google/genai": false
+  protobufjs: false

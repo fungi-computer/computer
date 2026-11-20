@@ -32,6 +32,13 @@ const terminalShell = "/bin/bash";
 /** The guest's `sshd -i`, with fixed argv; nothing a client sends reaches it. */
 const sshd = "/usr/sbin/sshd";
 const sshdArguments = ["-i", "-e", "-f", "/opt/fungi/sshd_config"];
+/**
+ * Every process a connection starts carries this variable, set by sshd itself
+ * from a value this server numbers. It finds a command that outlived its sshd,
+ * which no process tree can: the command is reparented to init the moment sshd
+ * exits, and a client's own disconnect makes sshd exit first.
+ */
+const sshSessionVariable = "FUNGI_SSH_SESSION";
 /** What vmd supplies at boot (computer-start.sh); without them there is no SSH. */
 const sshFiles = [
   "/run/fungi-ssh/host_ed25519",
@@ -79,6 +86,25 @@ function descendants(root) {
   return found;
 }
 
+/** Processes marked with one connection's id, from /proc; never this server. */
+function marked(id) {
+  const needle = Buffer.from(`${sshSessionVariable}=${id}\0`);
+  const found = [];
+  for (const name of readdirSync("/proc")) {
+    if (!/^[0-9]+$/u.test(name) || Number(name) === process.pid) continue;
+    try {
+      if (readFileSync(`/proc/${name}/environ`).includes(needle))
+        found.push(Number(name));
+    } catch (cause) {
+      // Exited while the table was read, or belongs to another user, so it
+      // cannot be one of this connection's.
+      if (["ENOENT", "ESRCH", "EACCES", "EPERM"].includes(cause.code)) continue;
+      throw cause;
+    }
+  }
+  return found;
+}
+
 function signal(pid, name) {
   try {
     process.kill(pid, name);
@@ -96,16 +122,17 @@ function signal(pid, name) {
  * alone once it is gone (the number may be reused), while a descendant that
  * was alive when the walk ran is still killed.
  */
-function killSshd(child) {
+function killSshd(child, id) {
   const pid = child.pid;
   if (pid === undefined) return;
   const exited = () => child.exitCode !== null || child.signalCode !== null;
-  const doomed = exited() ? [] : [pid, ...descendants(pid)];
+  const doomed = new Set(exited() ? [] : [pid, ...descendants(pid)]);
+  for (const target of marked(id)) doomed.add(target);
   signal(-pid, "SIGTERM");
   for (const target of doomed) signal(target, "SIGTERM");
   setTimeout(() => {
     if (!exited()) signal(-pid, "SIGKILL");
-    for (const target of doomed)
+    for (const target of new Set([...doomed, ...marked(id)]))
       if (target !== pid || !exited()) signal(target, "SIGKILL");
   }, sshKillGraceMs).unref();
 }
@@ -131,6 +158,8 @@ function shellEnvironment(labels) {
 class TerminalSessions {
   #sessions = new Map();
   #ssh = new Set();
+  /** Numbers each SSH connection, so its marker is unique within this server. */
+  #connections = 0;
   #spawnSshd;
   #spawn;
   #now;
@@ -211,23 +240,29 @@ class TerminalSessions {
       socket.close(1013, "terminal session limit");
       return;
     }
-    const child = this.#spawnSshd();
+    const id = `${String(process.pid)}-${String(this.#connections++)}`;
+    const child = this.#spawnSshd(id);
     const session = { socket, child };
     this.#ssh.add(session);
     const stream = createWebSocketStream(socket);
     const finish = () => {
       if (!this.#ssh.delete(session)) return;
+      killSshd(child, id);
       stream.destroy();
-      killSshd(child);
       if (socket.readyState === socket.OPEN) socket.close(1000, "sshd exited");
     };
     child.once("exit", finish);
     child.once("error", finish);
+    // The client going away ends the stream before the socket's own close
+    // event. The pipe must not pass that end to sshd's stdin on its own: sshd
+    // exits on it, and a command it started is then out of reach of the tree
+    // walk. `finish` reads the tree first, then stops sshd.
+    stream.once("end", finish);
     socket.once("close", finish);
     stream.on("error", finish);
     child.stdin.on("error", finish);
     child.stdout.on("error", finish);
-    stream.pipe(child.stdin);
+    stream.pipe(child.stdin, { end: false });
     child.stdout.pipe(stream);
     socket.on("error", () => {
       socket.terminate();
@@ -312,16 +347,20 @@ class TerminalSessions {
   }
 }
 
-function spawnFixedSshd() {
-  return spawn(sshd, sshdArguments, {
-    cwd: "/",
-    // Its own process group, so one signal reaches sshd and its helpers.
-    detached: true,
-    // sshd's own log (VERBOSE, with each certificate's key id) goes to this
-    // process's stderr, which the container runtime collects.
-    stdio: ["pipe", "pipe", "inherit"],
-    env: { PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin" },
-  });
+function spawnFixedSshd(id) {
+  return spawn(
+    sshd,
+    [...sshdArguments, "-o", `SetEnv=${sshSessionVariable}=${id}`],
+    {
+      cwd: "/",
+      // Its own process group, so one signal reaches sshd and its helpers.
+      detached: true,
+      // sshd's own log (VERBOSE, with each certificate's key id) goes to this
+      // process's stderr, which the container runtime collects.
+      stdio: ["pipe", "pipe", "inherit"],
+      env: { PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin" },
+    },
+  );
 }
 
 /** Serve `/health` and the `/pty` and `/ssh` upgrades on one private container port. */

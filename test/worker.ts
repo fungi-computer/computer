@@ -865,6 +865,19 @@ export class ComputerDO extends NativeComputerDO {
         ),
       );
     }
+    // Declared-services proofs end a runtime to prove the next wake.
+    if (
+      url.pathname === "/test-container-destroy" &&
+      request.method === "POST"
+    ) {
+      // The runtime goes away on whichever backing hosts it: the platform
+      // container, or the on-box VM under celld.
+      const hosted = this.hostedRoute();
+      if (hosted?.backing.kind === "on-box-vm")
+        await this.onBoxVmHost(hosted.backing.hostId).destroy();
+      else await this.state.container?.destroy();
+      return Response.json({ ok: true });
+    }
     if (url.pathname === "/test-patch" && request.method === "POST") {
       return Response.json(
         await this.applyPatchAfterAcceptance(
@@ -1183,6 +1196,18 @@ export default {
       };
       return await stub.fetch(
         new Request(new URL("/test-process-start", request.url), request),
+      );
+    }
+    if (url.pathname === "/host-container-destroy") {
+      // SAFETY: the fixture's named DO binding reaches its test-only protected host seam.
+      const stub = computer as ComputerRpc & {
+        fetch: (request: Request) => Promise<Response>;
+      };
+      return await stub.fetch(
+        new Request(
+          new URL(`/test-${url.pathname.slice("/host-".length)}`, request.url),
+          request,
+        ),
       );
     }
     if (url.pathname === "/host-patch" && request.method === "POST") {

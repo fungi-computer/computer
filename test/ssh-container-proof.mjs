@@ -171,7 +171,7 @@ function ssh(directory, address, options, command, environment = {}) {
   const done = new Promise((resolve) =>
     child.once("exit", (code) => resolve({ ...result, code })),
   );
-  return { child, done };
+  return { child, done, output: result };
 }
 
 const identity = (key, certificate) => [
@@ -337,7 +337,16 @@ async function runProof(directory) {
 
     // The session counts as attached while it lives, and sshd runs as the
     // runtime user and listens on nothing.
-    const held = ssh(directory, address, identity(key, valid), ["sleep 60"]);
+    // The command prints before it sleeps, so its output proves sshd finished
+    // authenticating and started the session; the Computer counts the socket
+    // earlier than that, while sshd is still re-executing itself.
+    const held = ssh(directory, address, identity(key, valid), [
+      "echo started; sleep 60",
+    ]);
+    await eventually(
+      () => held.output.stdout.includes("started"),
+      `the SSH session never started its command: ${held.output.stderr}`,
+    );
     await eventually(
       async () => (await sessions(address)) === 1,
       "the SSH session was not counted in /sessions",

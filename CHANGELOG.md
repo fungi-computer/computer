@@ -1,5 +1,28 @@
 # @fungi.computer/computer
 
+## 0.17.0
+
+### Minor Changes
+
+- Changes since 0.16.6:
+
+  - feat(hub): serve the declared-service tools on hosted Computers
+  - feat(computer): let an Agent declare services that survive sleep
+  - feat(computer): slim image with pinned fungi-tools installs
+  - fix(computer): use pinned codex launcher and record release claim
+  - feat(computer): preinstall languages and coding agent tools
+  - fix(computer): merge current integration and retain procps
+  - fix(computer): reconcile preinstalled tools with integration
+
+### Patch Changes
+
+- Updated dependencies
+- Updated dependencies
+  - @fungi.computer/computer-contract@0.6.0
+  - @fungi.computer/watchdog@0.1.5
+  - @fungi.computer/seam@0.2.7
+  - @fungi.computer/knapsack@0.4.24
+
 ## 0.16.6
 
 ### Patch Changes

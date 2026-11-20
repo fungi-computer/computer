@@ -43,6 +43,7 @@ if (readRuntimePrivilegeMode() === "vm-sudo") {
 }
 
 let terminal;
+let services;
 const daemon = spawn(process.execPath, [computerd], {
   stdio: ["ignore", "inherit", "inherit", "ipc"],
   env: {
@@ -55,6 +56,7 @@ const maximumRuntimeMs = boundedRuntimeMs(process.env.COMPUTER_MAX_RUNTIME_MS);
 setTimeout(() => {
   log("runtime deadline reached", { maximumRuntimeMs });
   stopping = true;
+  services?.kill("SIGTERM");
   terminal?.kill("SIGTERM");
   daemon.kill("SIGTERM");
   setTimeout(() => process.exit(0), 5_000).unref();
@@ -62,6 +64,7 @@ setTimeout(() => {
 
 daemon.once("exit", (code, signal) => {
   log("computerd exited", { code, signal, stopping });
+  services?.kill("SIGTERM");
   terminal?.kill("SIGTERM");
   // An unrequested exit is a failure even when computerd reports 0.
   process.exit(stopping ? (code ?? 0) : 1);
@@ -122,7 +125,31 @@ try {
     });
   });
   log("terminal listening", { port: terminalPort });
+  // The declared services' supervisor: a third fundamental child, like the
+  // terminal. s6 restarts each service; if s6-svscan itself dies, the runtime
+  // exits and the next one starts every enabled service again.
+  const servicesDir = process.env.COMPUTER_SERVICES_DIR;
+  if (servicesDir !== undefined) {
+    services = spawn("s6-svscan", [servicesDir], {
+      stdio: ["ignore", "inherit", "inherit"],
+      env: process.env,
+    });
+    services.once("error", (error) => {
+      log("s6-svscan failed to start", { error: error.message });
+      terminal?.kill("SIGTERM");
+      daemon.kill("SIGTERM");
+      process.exit(1);
+    });
+    services.once("exit", (code, signal) => {
+      log("s6-svscan exited", { code, signal, stopping });
+      terminal?.kill("SIGTERM");
+      daemon.kill("SIGTERM");
+      process.exit(stopping ? 0 : 1);
+    });
+    log("services supervisor started", { dir: servicesDir });
+  }
 } catch (error) {
+  services?.kill("SIGTERM");
   daemon.kill("SIGTERM");
   throw new Error("Computer terminal failed to listen", { cause: error });
 }
@@ -130,6 +157,7 @@ try {
 for (const signal of ["SIGTERM", "SIGINT"]) {
   process.on(signal, () => {
     stopping = true;
+    services?.kill("SIGTERM");
     terminal?.kill("SIGTERM");
     daemon.kill(signal);
   });
