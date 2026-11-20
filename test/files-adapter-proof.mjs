@@ -2,7 +2,11 @@
 
 import assert from "node:assert/strict";
 
-import { createWorkspaceFilesPort } from "../dist/files.js";
+import {
+  agentWorkspacePath,
+  createWorkspaceFilesPort,
+  workspaceRoot,
+} from "../dist/files.js";
 
 const calls = [];
 const text = new TextEncoder();
@@ -95,9 +99,26 @@ assert.deepEqual(await port.read({ path: "/shot.png", offset: 0, limit: 4 }), {
     bytes: png.byteLength,
   },
 });
+// An Agent's relative path means what a shell in /workspace resolves.
+assert.equal(workspaceRoot, "/workspace");
+assert.deepEqual(
+  [".", "", "a/b", "./a//b/", "a/../b", "/a/b", "/workspace", "/"].map(
+    agentWorkspacePath,
+  ),
+  [
+    "/workspace",
+    "/workspace",
+    "/workspace/a/b",
+    "/workspace/a/b",
+    "/workspace/b",
+    "/a/b",
+    "/workspace",
+    "/",
+  ],
+);
 assert.deepEqual(await port.list({ path: ".", limit: 1 }), {
   path: ".",
-  results: [{ path: "/a.txt", type: "file" }],
+  results: [{ path: "/workspace/a.txt", type: "file" }],
   truncated: "limit",
 });
 assert.deepEqual(
@@ -194,13 +215,22 @@ assert.deepEqual(
   }),
   { path: "/hello.txt", bytes: 7 },
 );
+assert.equal(
+  (await port.read({ path: "src/hello.txt", offset: 0, limit: 4 })).path,
+  "src/hello.txt",
+);
+await port.replace({
+  path: "src/hello.txt",
+  expectedContent: "hello",
+  content: "updated",
+});
 assert.deepEqual(calls, [
   ["stat", "/hello.txt"],
   ["readFile", "/hello.txt", { byteOffset: 0, byteLength: 5 }],
   ["stat", "/shot.png"],
   ["readFile", "/shot.png", { byteOffset: 0, byteLength: 8 }],
-  ["stat", "/"],
-  ["readdir", "/", { limit: 2 }],
+  ["stat", "/workspace"],
+  ["readdir", "/workspace", { limit: 2 }],
   ["stat", "/"],
   ["find", "/", "*.txt", { limit: 2 }],
   ["stat", "/"],
@@ -218,6 +248,16 @@ assert.deepEqual(calls, [
     "replaceFileIfUnchanged",
     {
       path: "/hello.txt",
+      expectedContent: "hello",
+      content: "updated",
+    },
+  ],
+  ["stat", "/workspace/src/hello.txt"],
+  ["readFile", "/workspace/src/hello.txt", { byteOffset: 0, byteLength: 5 }],
+  [
+    "replaceFileIfUnchanged",
+    {
+      path: "/workspace/src/hello.txt",
       expectedContent: "hello",
       content: "updated",
     },

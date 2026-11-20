@@ -115,8 +115,10 @@ import {
 } from "@fungi.computer/computer-contract";
 
 import {
+  agentWorkspacePath,
   createWorkspaceFilesPort,
   readBoundedWorkspaceText,
+  workspaceRoot,
   workspaceFileExists,
   listWorkspaceFiles,
 } from "./files.js";
@@ -465,8 +467,6 @@ class ComputerDurableObject extends DurableObject<ComputerEnv> {
 const ContainerComputerBase = withWorkspaceContainer(ComputerDurableObject);
 
 /** One Workspace built for one attached-backend set. */
-/** The directory every Computer backend mounts as its guest workspace. */
-const workspaceMountRoot = "/workspace";
 type WorkspaceGeneration = Readonly<{
   key: string;
   workspace: Workspace;
@@ -865,14 +865,24 @@ class ContainerComputer extends ContainerComputerBase {
     const workspace = this.workspace();
     await workspace.ready();
     if (!this.#rootedWorkspaces.has(workspace)) {
-      await workspace.fs.mkdir(workspaceMountRoot, { recursive: true });
+      await workspace.fs.mkdir(workspaceRoot, { recursive: true });
       this.#rootedWorkspaces.add(workspace);
     }
     return workspace;
   }
 
+  /**
+   * A host's one-time work before the first Files operation reaches the
+   * Workspace. It runs outside the file queue, so an implementation may use
+   * {@link copyWorkspaceFileIfFree}. It must never throw.
+   */
+  protected prepareFiles(): Promise<void> {
+    return Promise.resolve();
+  }
+
   /** `getWorkspace(stub)` reaches the current generation through this door. */
   async __getWorkspaceStub() {
+    await this.prepareFiles();
     return (await this.readyWorkspace()).stub();
   }
 
@@ -1352,6 +1362,50 @@ export class ComputerDO extends ContainerComputer implements ComputerFilesRpc {
     }
   }
 
+  /**
+   * Copy one Workspace file to a path nothing occupies, keeping the original,
+   * and say what it found. It runs in the file queue and first pulls every
+   * attached guest, so a guest that is ahead of the Workspace is seen before
+   * the copy and the next push cannot overwrite what the guest changed. A guest
+   * whose state cannot be read (a runtime whose pull fails, or an attached
+   * machine that is offline) makes the answer "unknown": nothing is copied.
+   */
+  protected async copyWorkspaceFileIfFree(
+    from: string,
+    to: string,
+  ): Promise<"copied" | "absent" | "conflict" | "unknown"> {
+    return await this.#withBinaryFile(async () => {
+      const workspace = await this.readyWorkspace();
+      for (const backend of this.attachedBackends()) {
+        const id = attachedBackendId(backend);
+        try {
+          if (backend.kind === "local") {
+            if (!this.localConnections.online(id)) return "unknown";
+          } else if (!(await this.containerRunning(backend))) continue;
+          await workspace.pull(id);
+        } catch (cause) {
+          if (cause instanceof ComputerContainersPausedError) continue;
+          console.error(`Computer Workspace pull before a copy failed`, cause);
+          return "unknown";
+        }
+      }
+      const provider = new SQLiteWorkspaceProvider(workspace.fs.db);
+      const outcome = this.state.storage.transactionSync(() => {
+        if (!workspaceFileExists(provider, from)) return "absent" as const;
+        if (workspaceFileExists(provider, to)) return "conflict" as const;
+        const stat = provider.statSync(from);
+        if (!stat.isFile()) return "absent" as const;
+        provider.writeFileSync(
+          to,
+          new Uint8Array(provider.readRangeSync(from, 0, stat.size)),
+        );
+        return "copied" as const;
+      });
+      if (outcome === "copied") await this.#syncRunningHosted("push");
+      return outcome;
+    });
+  }
+
   /** One loop per Computer while any terminal socket is attached. */
   #startTerminalSync(backing: HostedBacking): void {
     if (this.#terminalSync !== undefined) return;
@@ -1407,6 +1461,7 @@ export class ComputerDO extends ContainerComputer implements ComputerFilesRpc {
       byteOffset = 0,
       byteLength,
     } = readBytesInputSchema.parse(input);
+    await this.prepareFiles();
     return await this.#withBinaryFile(async () => {
       const workspace = await this.readyWorkspace();
       accept();
@@ -1476,6 +1531,7 @@ export class ComputerDO extends ContainerComputer implements ComputerFilesRpc {
     accept: () => void,
   ): Promise<void> {
     const { path } = readInputSchema.parse(input);
+    await this.prepareFiles();
     await this.#withBinaryFile(async () => {
       const workspace = await this.readyWorkspace();
       accept();
@@ -1491,6 +1547,7 @@ export class ComputerDO extends ContainerComputer implements ComputerFilesRpc {
       files: ReturnType<typeof createWorkspaceFilesPort>,
     ) => Promise<A>,
   ): Promise<A> {
+    await this.prepareFiles();
     const workspace = await this.readyWorkspace();
     accept();
     await this.#syncRunningHosted("pull");
@@ -1581,6 +1638,7 @@ export class ComputerDO extends ContainerComputer implements ComputerFilesRpc {
       case "wait_process":
         return await this.waitProcessAfterAcceptance(input, accept);
     }
+    await this.prepareFiles();
     const workspace = await this.readyWorkspace();
     accept();
     switch (selected) {
@@ -2317,6 +2375,7 @@ export class ComputerDO extends ContainerComputer implements ComputerFilesRpc {
     accept: () => void,
   ): Promise<ComputerFileReplacementResult> {
     const replacement = replaceInputSchema.parse(input);
+    await this.prepareFiles();
     const workspace = await this.readyWorkspace();
     await this.#syncRunningHosted("pull");
     const provider = new SQLiteWorkspaceProvider(workspace.fs.db);
@@ -2399,7 +2458,10 @@ export function createComputerFilesPort(
     grep: (input) => withFiles((files) => files.grep(input)),
     replace: async (input, context) => {
       context.signal.throwIfAborted();
-      return await computer.replaceFileIfUnchanged(input);
+      return await computer.replaceFileIfUnchanged({
+        ...input,
+        path: agentWorkspacePath(input.path),
+      });
     },
   };
 }

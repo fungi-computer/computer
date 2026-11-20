@@ -4,11 +4,12 @@ import {
   patchOutputSchema,
 } from "@fungi.computer/computer-contract";
 import { boundExecStream } from "./exec-output.js";
+import { workspaceRoot } from "./files.js";
 
 /** The packaged, pinned Codex engine owns patch parsing and the Workspace jail. */
 const nativePatch = {
   executable: "/opt/fungi/fungi-apply-patch",
-  cwd: "/workspace",
+  cwd: workspaceRoot,
   timeoutMs: 30_000,
   mismatchExitCode: 23,
 };

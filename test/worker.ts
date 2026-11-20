@@ -1015,6 +1015,24 @@ const replaceInput = z.strictObject({
 });
 // The Files port, unlike the Computer itself, only replaces an existing file.
 const portReplaceInput = replaceInput.extend({ expectedContent: z.string() });
+// An Agent's Files call: the real Oyster port (`createComputerFilesPort`) with
+// the relative paths an Agent writes.
+const agentFilesInput = z.discriminatedUnion("operation", [
+  z.strictObject({
+    operation: z.literal("read"),
+    path: z.string().min(1),
+  }),
+  z.strictObject({
+    operation: z.literal("list"),
+    path: z.string().min(1),
+  }),
+  z.strictObject({
+    operation: z.literal("replace"),
+    path: z.string().min(1),
+    expectedContent: z.string(),
+    content: z.string(),
+  }),
+]);
 const filesReadInput = z.strictObject({
   path: z.string().min(1),
   offset: z.number().int().nonnegative(),
@@ -1248,6 +1266,36 @@ export default {
       const port = createWorkspaceFilesPort(workspace, computer);
       return Response.json(
         await port.read(filesReadInput.parse(await request.json())),
+      );
+    }
+    if (url.pathname === "/agent-files" && request.method === "POST") {
+      const input = agentFilesInput.parse(await request.json());
+      const port = createComputerFilesPort(computer);
+      const context = {
+        executionId: "agent-files-proof",
+        deadlineAt: null,
+        signal: request.signal,
+      };
+      if (input.operation === "read")
+        return Response.json(
+          await port.read(
+            { path: input.path, offset: 0, limit: 4_096 },
+            context,
+          ),
+        );
+      if (input.operation === "list")
+        return Response.json(
+          await port.list({ path: input.path, limit: 100 }, context),
+        );
+      return Response.json(
+        await port.replace(
+          {
+            path: input.path,
+            expectedContent: input.expectedContent,
+            content: input.content,
+          },
+          context,
+        ),
       );
     }
     if (url.pathname === "/files/replace" && request.method === "POST") {

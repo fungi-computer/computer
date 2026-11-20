@@ -1,5 +1,14 @@
 # @fungi.computer/computer
 
+## 0.16.2
+
+### Patch Changes
+
+- Changes since 0.16.1:
+
+  - fix(oyster): copy the root AGENTS.md after pulling the guest
+  - fix(computer): resolve an agent's relative file paths from /workspace
+
 ## 0.16.1
 
 ### Patch Changes

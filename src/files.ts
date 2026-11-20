@@ -26,6 +26,20 @@ import {
 } from "@fungi.computer/computer-contract";
 const utf8 = new TextEncoder();
 
+/**
+ * The guest's mount of the Workspace filesystem, and the working directory of
+ * exec and apply_patch. It is the one root an Agent's relative path means.
+ */
+export const workspaceRoot = "/workspace";
+
+/**
+ * The Workspace path an Agent's Files path names: what a shell in
+ * {@link workspaceRoot} would resolve. Absolute paths pass through unchanged.
+ */
+export function agentWorkspacePath(path: string): string {
+  return posix.resolve(workspaceRoot, path);
+}
+
 type GrepOptions = NonNullable<Parameters<WorkspaceFiles["fs"]["grep"]>[2]>;
 
 export type WorkspaceFilesOwner = Readonly<{
@@ -134,7 +148,8 @@ export function createWorkspaceFilesPort(
 ) {
   const port = {
     async read(input) {
-      const stat = await workspace.fs.stat(input.path);
+      const target = agentWorkspacePath(input.path);
+      const stat = await workspace.fs.stat(target);
       if (!stat.isFile)
         throw new Error(`Files path is not a file: ${input.path}`);
       if (input.offset > stat.size) {
@@ -152,7 +167,7 @@ export function createWorkspaceFilesPort(
       // The first read covers the sniff window whatever the caller's limit.
       const windowBytes = await readBytes(
         workspace,
-        input.path,
+        target,
         input.offset,
         Math.min(
           input.offset === 0
@@ -176,7 +191,7 @@ export function createWorkspaceFilesPort(
           mimeType,
           windowBytes.byteLength === stat.size
             ? windowBytes
-            : await readBytes(workspace, input.path, 0, stat.size),
+            : await readBytes(workspace, target, 0, stat.size),
         );
       }
       const pageBytes = windowBytes.subarray(0, input.limit);
@@ -212,10 +227,14 @@ export function createWorkspaceFilesPort(
     async glob(input, context?: Parameters<FilesPort["glob"]>[1]) {
       const output = await visibleSearch(
         workspace,
-        workspacePath(input.path),
+        agentWorkspacePath(input.path),
         input.limit,
         (options) =>
-          workspace.fs.find(workspacePath(input.path), input.pattern, options),
+          workspace.fs.find(
+            agentWorkspacePath(input.path),
+            input.pattern,
+            options,
+          ),
         (entry) => entry.type === "dir",
         context?.signal,
       );
@@ -237,10 +256,10 @@ export function createWorkspaceFilesPort(
       if (input.include !== undefined) options.include = input.include;
       const output = await visibleSearch(
         workspace,
-        workspacePath(input.path),
+        agentWorkspacePath(input.path),
         input.limit,
         (page) =>
-          workspace.fs.grep(input.pattern, workspacePath(input.path), {
+          workspace.fs.grep(input.pattern, agentWorkspacePath(input.path), {
             ...options,
             ...page,
           }),
@@ -259,7 +278,10 @@ export function createWorkspaceFilesPort(
     },
     async replace(input) {
       return replaceOutputSchema.parse(
-        await owner.replaceFileIfUnchanged(input),
+        await owner.replaceFileIfUnchanged({
+          ...input,
+          path: agentWorkspacePath(input.path),
+        }),
       );
     },
   } satisfies FilesPort;
@@ -295,7 +317,7 @@ function searchWorkspaceDirectory(
   input: ComputerFileListInput,
   signal?: AbortSignal,
 ) {
-  const path = workspacePath(input.path);
+  const path = agentWorkspacePath(input.path);
   return visibleSearch(
     workspace,
     path,
@@ -332,12 +354,6 @@ export async function listWorkspaceFiles(
     nextOffset:
       output.truncated === null ? null : input.offset + output.results.length,
   };
-}
-
-/** Computer wire paths are absolute within its Workspace, even for relative Files inputs. */
-function workspacePath(path: string): string {
-  if (path === ".") return "/";
-  return path.startsWith("/") ? path : `/${path}`;
 }
 
 const missingSchema = z.object({ code: z.literal("ENOENT") });

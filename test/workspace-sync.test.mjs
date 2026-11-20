@@ -75,6 +75,8 @@ test("Local and hosted search roots and entries have the same visibility", async
   });
   const localRoot = await mkdtemp(resolve(directory, "local-visibility-"));
   try {
+    // The hosted Agent root is the guest's /workspace; Local's is its folder.
+    await workspace.fs.mkdir("/workspace");
     for (const path of [
       ".git",
       ".git/nested",
@@ -83,7 +85,7 @@ test("Local and hosted search roots and entries have the same visibility", async
       "build",
       "build/sub",
     ]) {
-      await workspace.fs.mkdir(`/${path}`);
+      await workspace.fs.mkdir(`/workspace/${path}`);
       await mkdir(resolve(localRoot, path));
     }
     for (const [path, content] of [
@@ -98,7 +100,7 @@ test("Local and hosted search roots and entries have the same visibility", async
       ["visible.txt", "needle"],
       [".gitlike", "needle"],
     ]) {
-      await workspace.fs.writeFile(`/${path}`, content);
+      await workspace.fs.writeFile(`/workspace/${path}`, content);
       await writeFile(resolve(localRoot, path), content);
     }
     const adapters = [
@@ -184,12 +186,14 @@ test("Local and hosted search roots and entries have the same visibility", async
             context,
           );
           assert.deepEqual(
-            output.results.map((entry) => entry.path.replace(/^\//, "")).sort(),
+            output.results
+              .map((entry) => entry.path.replace(/^\/(workspace\/)?/, ""))
+              .sort(),
             ["visible.txt"],
           );
           assert.deepEqual(
             (await port.list({ path: ".", limit: 100 }, context)).results
-              .map((entry) => entry.path.replace(/^\//, ""))
+              .map((entry) => entry.path.replace(/^\/(workspace\/)?/, ""))
               .sort(),
             [".gitignore", ".gitlike", "src", "visible.txt"],
           );
@@ -198,15 +202,10 @@ test("Local and hosted search roots and entries have the same visibility", async
             "build/hidden.txt",
             "hidden.log",
           ]) {
-            // Exact reads retain each adapter's native locator (Workspace is absolute).
-            const readPath = adapter === "hosted" ? `/${path}` : path;
+            // Both adapters resolve the same relative path to the same file.
             assert.equal(
-              (
-                await port.read(
-                  { path: readPath, offset: 0, limit: 100 },
-                  context,
-                )
-              ).content,
+              (await port.read({ path, offset: 0, limit: 100 }, context))
+                .content,
               "needle",
             );
           }
