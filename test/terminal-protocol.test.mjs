@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
 import {
   boundedInteger,
+  maximumSessions,
+  maximumSshSessions,
   parseResize,
+  sshHasRoom,
   ReplayRing,
 } from "../container/terminal-protocol.mjs";
 
@@ -21,6 +24,14 @@ for (const frame of [
   '{"type":"resize","cols":"12x","rows":40}',
 ])
   assert.equal(parseResize(frame), null, frame);
+
+// SSH has its own cap below the shared pool, so one member's transports cannot
+// take every slot a Team's terminals need.
+assert.ok(maximumSshSessions < maximumSessions);
+assert.equal(sshHasRoom(0), true);
+assert.equal(sshHasRoom(maximumSshSessions - 1), true);
+assert.equal(sshHasRoom(maximumSshSessions), false);
+assert.equal(sshHasRoom(maximumSessions), false);
 
 assert.equal(boundedInteger(null, 2, 500, 80), 80);
 assert.equal(boundedInteger("99999", 2, 500, 80), 80);

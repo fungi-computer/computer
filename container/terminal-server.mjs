@@ -21,9 +21,11 @@ import manifest from "./package.json" with { type: "json" };
 import { createWebSocketStream, WebSocketServer } from "ws";
 import {
   boundedInteger,
+  maximumSessions,
   parseResize,
   ReplayRing,
   replayBytes,
+  sshHasRoom,
 } from "./terminal-protocol.mjs";
 
 const terminalShell = "/bin/bash";
@@ -38,7 +40,6 @@ const sshFiles = [
 ];
 /** How long a hung-up SSH session's processes get after SIGTERM before SIGKILL. */
 const sshKillGraceMs = 2_000;
-const maximumSessions = 16;
 const detachedLifetimeMs = 30 * 60 * 1_000;
 /** A client that cannot drain this much output reconnects and replays. */
 const maximumBufferedBytes = 4 * 1_024 * 1_024;
@@ -205,7 +206,7 @@ class TerminalSessions {
    * socket's binary frames. It ends with either side, and never outlives it.
    */
   attachSsh(socket) {
-    if (!this.#makeRoom()) {
+    if (!sshHasRoom(this.#ssh.size) || !this.#makeRoom()) {
       send(socket, { type: "error", message: "terminal session limit" });
       socket.close(1013, "terminal session limit");
       return;

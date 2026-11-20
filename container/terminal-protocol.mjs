@@ -56,3 +56,13 @@ export class ReplayRing {
     return Buffer.concat(this.#chunks, this.#bytes);
   }
 }
+
+/** The most PTY and SSH sessions one Computer serves at once. */
+export const maximumSessions = 16;
+/** SSH transports alone stop here, so terminals keep slots a member cannot fill. */
+export const maximumSshSessions = 8;
+
+/** May another SSH transport open, given how many are open now? */
+export function sshHasRoom(sshOpen) {
+  return sshOpen < maximumSshSessions;
+}
