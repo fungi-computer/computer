@@ -51,6 +51,11 @@ async function call(worker, capability, input) {
     throw new Error(`Computer ${capability} failed: ${await response.text()}`);
   }
   const result = await response.json();
+  // An unknown outcome carries no output: name it, instead of a schema error.
+  if ((capability === "exec" || capability === "bash") && !result.output)
+    throw new Error(
+      `Computer ${capability} ended ${result.status} with no output (the VM host or its firewall may have been removed under this run)`,
+    );
   return capability === "exec" || capability === "bash"
     ? result.output
     : result;
