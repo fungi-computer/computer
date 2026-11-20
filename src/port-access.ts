@@ -18,6 +18,16 @@ const principalSchema = z.union([
 export type PortVisibility = "private" | "unlisted" | "public";
 /** A host's registrable site, or null when it has none (IPs, single labels). */
 export type PortSite = (url: URL) => string | null;
+/** A stored session row: a share holds no principal, a member session does. */
+const storedSessionSchema = z.union([
+  z.object({ kind: z.literal("share"), principal_json: z.null() }),
+  z
+    .object({ kind: z.literal("member"), principal_json: z.string() })
+    .transform((row) => ({
+      kind: row.kind,
+      principal: principalSchema.parse(JSON.parse(row.principal_json)),
+    })),
+]);
 const credentialSchema = z
   .string()
   .length(LONG)
@@ -100,7 +110,13 @@ export class ComputerPortAccess {
     private readonly options: Readonly<{
       publicAccess?: "on";
       now?: () => number;
-    }> = {},
+      /**
+       * Whether the principal a member session stored still has access. It
+       * is asked on every request that session makes, so a viewer who loses
+       * access is refused at once rather than when the session expires.
+       */
+      admitted: (principal: PortAccessPrincipal) => Promise<boolean>;
+    }>,
   ) {
     initializePortAccess(storage);
   }
@@ -270,16 +286,17 @@ export class ComputerPortAccess {
     if (secret === undefined || !credentialSchema.safeParse(secret).success)
       return false;
     const sessionHash = await hash(secret);
-    return (
-      this.storage.sql
-        .exec(
-          "SELECT s.port FROM computer_port_session s JOIN computer_exposed_ports p ON p.port = s.port WHERE s.session_hash = ? AND s.port = ? AND s.expires_at > ? AND (p.visibility = 'unlisted' OR (p.visibility = 'private' AND s.kind = 'member'))",
-          sessionHash,
-          port,
-          this.now(),
-        )
-        .toArray().length === 1
-    );
+    const row = this.storage.sql
+      .exec(
+        "SELECT s.kind, s.principal_json FROM computer_port_session s JOIN computer_exposed_ports p ON p.port = s.port WHERE s.session_hash = ? AND s.port = ? AND s.expires_at > ? AND (p.visibility = 'unlisted' OR (p.visibility = 'private' AND s.kind = 'member'))",
+        sessionHash,
+        port,
+        this.now(),
+      )
+      .toArray()[0];
+    if (row === undefined) return false;
+    const session = storedSessionSchema.parse(row);
+    return session.kind === "share" || this.options.admitted(session.principal);
   }
 
   /** Mount on one target host. Forwarding remains responsible for live exposure. */

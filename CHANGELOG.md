@@ -1,5 +1,16 @@
 # @fungi.computer/computer
 
+## 0.16.6
+
+### Patch Changes
+
+- Changes since 0.16.5:
+
+  - fix(computer): end a port preview session when its viewer loses access
+
+- Updated dependencies
+  - @fungi.computer/computer-contract@0.5.11
+
 ## 0.16.5
 
 ### Patch Changes

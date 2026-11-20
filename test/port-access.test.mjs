@@ -207,6 +207,21 @@ test("tokens and sessions bind to one Computer and port, expire without sliding,
   assert.equal((await f.call(`/page?token=${expiring}`)).status, 401);
 });
 
+test("a member session ends when its viewer loses access, and an unlisted share is unaffected", async () => {
+  const f = await fixture();
+  const member = await f.call(`/page?token=${await f.issue()}`);
+  assert.equal(member.status, 302);
+  assert.equal((await f.call("/page", { cookie: cookie(member) })).status, 200);
+  const { share } = await (await f.call("/visibility?value=unlisted")).json();
+  const shared = await f.call(`/page?t=${share}`);
+  const viewer = await f.call(`/page?token=${await f.issue()}`);
+  await f.call("/owner?value=successor");
+  assert.equal((await f.call("/page", { cookie: cookie(viewer) })).status, 401);
+  assert.equal((await f.call("/page", { cookie: cookie(shared) })).status, 200);
+  await f.call("/owner?value=owner");
+  assert.equal((await f.call("/page", { cookie: cookie(viewer) })).status, 200);
+});
+
 test("unexpose revokes tokens and sessions even after re-exposure", async () => {
   const f = await fixture();
   const response = await f.call(`/page?token=${await f.issue()}`);

@@ -6,6 +6,8 @@ import { ComputerProcessInventory } from "../src/process-inventory.js";
 /** Each test gets an independent Computer database, seeded before migration. */
 export class PortAccessProof extends DurableObject {
   private time = 1_000_000;
+  /** The host's current owner; a stored session names the owner it admitted. */
+  private owner = "owner";
   override async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const sql = this.ctx.storage.sql;
@@ -29,6 +31,10 @@ export class PortAccessProof extends DurableObject {
     }
     let options: ConstructorParameters<typeof ComputerPortAccess>[1] = {
       now: () => this.time,
+      admitted: (principal) =>
+        Promise.resolve(
+          "ownerId" in principal && principal.ownerId === this.owner,
+        ),
     };
     if (url.searchParams.get("public") === "on")
       options = { ...options, publicAccess: "on" };
@@ -77,6 +83,10 @@ export class PortAccessProof extends DurableObject {
     }
     if (url.pathname === "/reexpose") {
       sql.exec("INSERT INTO computer_exposed_ports(port) VALUES (?)", port);
+      return new Response(null);
+    }
+    if (url.pathname === "/owner") {
+      this.owner = z.string().min(1).parse(url.searchParams.get("value"));
       return new Response(null);
     }
     if (url.pathname === "/advance") {
