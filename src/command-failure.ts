@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { ComputerExecOutput } from "@fungi.computer/computer-contract";
 
 /** Longest cause text reported to a caller. */
@@ -13,6 +14,28 @@ export type CommandStage = "preparing" | "dispatched";
 export type CommandFailure =
   | Readonly<{ kind: "not_started"; output: ComputerExecOutput }>
   | Readonly<{ kind: "unknown"; cause: string }>;
+
+const transportStageSchema = z.looseObject({
+  stage: z.enum(["start", "egress", "health", "restart"]),
+});
+/** Most causes followed when collecting connect stages. */
+const maximumCauseHops = 8;
+const transportNames: ReadonlySet<string> = new Set([
+  "WorkspaceTransportError",
+  "WorkspacePreDispatchTransportError",
+]);
+
+/** The Workspace's own transport failure, recognised by its tagged name. */
+function isTransportError(cause: unknown): cause is Error {
+  return cause instanceof Error && transportNames.has(cause.name);
+}
+
+/** The typed connect stage a transport failure carries, when it has one. */
+function transportStage(error: Error): string | undefined {
+  if (!isTransportError(error)) return undefined;
+  const parsed = transportStageSchema.safeParse(error);
+  return parsed.success ? parsed.data.stage : undefined;
+}
 
 function causeText(cause: unknown): string {
   return cause instanceof Error
@@ -46,7 +69,31 @@ export function describeCommandFailure(
     hosted: boolean;
   }>,
 ): CommandFailure {
-  if (input.hosted && input.stage === "dispatched")
+  if (input.hosted && input.stage === "dispatched") {
+    if (isTransportError(input.cause)) {
+      // Our own transport type carries no carriage content; only its typed
+      // connect stages are repeated, never its free text.
+      const stages = new Set<string>();
+      const seen = new Set<unknown>();
+      for (
+        let error: unknown = input.cause;
+        error instanceof Error &&
+        !seen.has(error) &&
+        seen.size < maximumCauseHops;
+        error = error.cause
+      ) {
+        seen.add(error);
+        const stage = transportStage(error);
+        if (stage !== undefined) stages.add(`stage=${stage}`);
+      }
+      return {
+        kind: "unknown",
+        cause:
+          stages.size > 0
+            ? `the Computer did not wake (connect failed at ${[...stages].join(", ")})`
+            : "the Computer's runtime connection failed (WorkspaceTransportError)",
+      };
+    }
     return {
       kind: "unknown",
       cause:
@@ -54,6 +101,7 @@ export function describeCommandFailure(
           ? `the native runtime failed (${input.cause.name})`
           : "the native runtime failed",
     };
+  }
   const cause = redact(causeText(input.cause), input.secrets);
   if (input.stage === "dispatched") return { kind: "unknown", cause };
   return {

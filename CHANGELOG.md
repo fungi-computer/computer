@@ -1,5 +1,18 @@
 # @fungi.computer/computer
 
+## 0.18.4
+
+### Patch Changes
+
+- Changes since 0.18.3:
+
+  - fix(computer): type the transport stage and bound the cause walk
+  - fix(computer): name the connect stage when a hosted Computer fails to wake
+
+- Updated dependencies
+  - @fungi.computer/computer-contract@0.6.4
+  - @fungi.computer/knapsack@0.4.27
+
 ## 0.18.3
 
 ### Patch Changes

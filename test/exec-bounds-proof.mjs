@@ -6,6 +6,8 @@
 // Run with the other on-box proofs: `leg1.sh exec-bounds`.
 import assert from "node:assert/strict";
 import console from "node:console";
+import process from "node:process";
+import { setTimeout } from "node:timers";
 import { mintComputerRequestId } from "@fungi.computer/computer-contract";
 import { proofWorkers } from "./proof-worker.mjs";
 
@@ -22,6 +24,7 @@ try {
     });
     return { http: response.status, body: await response.json() };
   };
+  const sleepMs = Number(process.env.VMD_SLEEP_OVERRIDE_MS ?? 0);
   const cases = [
     [
       "a command with the long timeout",
@@ -61,6 +64,9 @@ try {
     ],
   ];
   for (const [label, input, stdout] of cases) {
+    // The VM host stops a guest after its idle window, and a command that is
+    // quiet for longer than a short window is idle by that rule.
+    if (sleepMs > 0 && (input.timeoutMs ?? 0) >= 60_000) continue;
     const outcome = await bash(input);
     assert.equal(outcome.http, 200, `${label}: ${JSON.stringify(outcome)}`);
     assert.equal(
@@ -69,6 +75,25 @@ try {
       `${label}: ${JSON.stringify(outcome.body)}`,
     );
     assert.equal(outcome.body.output.stdout, stdout, label);
+  }
+  // A VM host that sleeps the guest after its idle window must wake it for
+  // the next command, which then runs and returns its result.
+  if (sleepMs > 0) {
+    await new Promise((resolve) => setTimeout(resolve, sleepMs + 8_000));
+    for (const label of ["first command after idle", "second command"]) {
+      const outcome = await bash({
+        command: "printf awake",
+        cwd: "/workspace",
+        timeoutMs: 30_000,
+      });
+      assert.equal(outcome.http, 200, `${label}: ${JSON.stringify(outcome)}`);
+      assert.equal(
+        outcome.body.status,
+        "succeeded",
+        `${label}: ${JSON.stringify(outcome.body)}`,
+      );
+      assert.equal(outcome.body.output.stdout, "awake", label);
+    }
   }
   console.log(JSON.stringify({ proof: "exec-bounds", verdict: "PASS" }));
 } finally {

@@ -154,7 +154,9 @@ async function runProof() {
   type(
     first,
     "npm install -g --no-fund --no-audit cowsay >/dev/null 2>&1 && cowsay login_$((6*7)); " +
-      "bash -c 'npm install -g --no-fund --no-audit cowsay >/dev/null 2>&1 && cowsay agent_$((6*8))'; " +
+      // A different package: npm reinstalling one that is already there can
+      // leave its bin or a dependency missing, which proves nothing about PATH.
+      "bash -c 'npm install -g --no-fund --no-audit semver >/dev/null 2>&1 && semver -r \">=4\" 4.8.0 >/dev/null && echo agent_$((6*8))'; " +
       "echo PREFIX_$(npm prefix -g | tr / _) PNPM_$(command -v pnpm | tr / _) HOMEPNPM_$(echo $PNPM_HOME | tr / _)\n",
   );
   await until(first, "login_42");
