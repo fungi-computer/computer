@@ -18,6 +18,18 @@ import { checkComputerGrant } from "./admission.js";
 import { computerKeepAwake } from "./keep-awake.js";
 import type { ComputerGrant } from "./wire.js";
 
+/**
+ * The hosted runtime was admitted and its workspace pushed, then it was not
+ * running. The name survives a Durable Object RPC, so a caller that only sees
+ * the error cross it can still say what happened.
+ */
+export class ComputerStartDisconnectedError extends Error {
+  constructor() {
+    super("Hosted Computer disconnected while starting");
+    this.name = "ComputerStartDisconnectedError";
+  }
+}
+
 /** Runtime observations consumed by the host; never host callbacks. */
 export type FleetLifecycleFact =
   | Readonly<{ kind: "reservation.release" | "reservation.monitor" }>
@@ -148,7 +160,7 @@ export class FleetLifecycle {
         await this.ports.backend.workspace().push(hosted.id);
       });
       if (!(await this.ports.backend.containerRunning(hosted.backing)))
-        throw new Error("Hosted Computer disconnected while starting");
+        throw new ComputerStartDisconnectedError();
       return { state: "running" as const };
     } finally {
       finish();

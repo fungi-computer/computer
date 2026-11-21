@@ -1,5 +1,16 @@
 # @fungi.computer/computer
 
+## 0.18.1
+
+### Patch Changes
+
+- Changes since 0.18.0:
+
+  - fix(hub): name a Computer that stopped while starting
+
+- @fungi.computer/knapsack@0.4.25
+  - @fungi.computer/computer-contract@0.6.1
+
 ## 0.18.0
 
 ### Minor Changes

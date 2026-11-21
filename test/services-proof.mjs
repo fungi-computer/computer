@@ -42,7 +42,7 @@ RUN useradd --uid 123456 --create-home --home-dir /workspace --shell /bin/sh fun
 WORKDIR /opt/fungi
 COPY package.json ./
 RUN npm install --omit=dev --ignore-scripts --no-fund --no-audit zod@4.4.3
-COPY fungi-services.mjs services-render.mjs ./
+COPY --chmod=644 fungi-services.mjs services-render.mjs ./
 COPY --chmod=755 fungi-services /usr/local/bin/fungi-services
 RUN install -d -m 0700 -o fungi -g fungi /var/cache/fungi-services
 ENV COMPUTER_SERVICES_DIR=/var/cache/fungi-services
