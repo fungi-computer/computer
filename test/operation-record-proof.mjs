@@ -181,7 +181,12 @@ test("reopening records unfinished work as unknown without rerunning it", () => 
   );
   computer.record.markRunning(requestId);
   computer.reopen();
-  assert.equal(computer.execute(requestId).status, "unknown");
+  const replay = computer.execute(requestId);
+  assert.equal(replay.status, "unknown");
+  assert.match(
+    replay.cause,
+    /restarted while this command was running.*check before running it again/u,
+  );
   assert.deepEqual(computer.runs, []);
 });
 
@@ -192,7 +197,9 @@ test("an uncertain failure records unknown and logs its cause", (t) => {
   computer.record.admit(requestId, "same-input", () => undefined);
   computer.record.markRunning(requestId);
   computer.record.settleUnknown(requestId, "Error: container start failed");
-  assert.equal(computer.execute(requestId).status, "unknown");
+  const replay = computer.execute(requestId);
+  assert.equal(replay.status, "unknown");
+  assert.equal(replay.cause, "Error: container start failed");
   assert.deepEqual(computer.runs, []);
   assert.equal(logged.mock.callCount(), 1);
   assert.deepEqual(logged.mock.calls[0].arguments[1], {

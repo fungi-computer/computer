@@ -912,7 +912,7 @@ export class ComputerDO extends NativeComputerDO {
               if (url.searchParams.has("denyAcceptance"))
                 throw new Error("Fixture execution acceptance refused");
             },
-            appMethod ? "bash" : "exec",
+            appMethod || url.searchParams.has("bash") ? "bash" : "exec",
             appMethod ? { maximumTimeMs: 45_000 } : undefined,
             appMethod ? cancellation.signal : undefined,
           ),

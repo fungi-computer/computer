@@ -127,6 +127,10 @@ import {
   listWorkspaceFiles,
 } from "./files.js";
 import { computerExecutionResult } from "./execution-result.js";
+import {
+  describeCommandFailure,
+  type CommandStage,
+} from "./command-failure.js";
 import { ComputerOperationRecord } from "./operation-record.js";
 import { createComputerExecutionLifecycle } from "./execution-lifecycle.js";
 import { applyWorkspacePatch } from "./files-patch.js";
@@ -1949,6 +1953,9 @@ export class ComputerDO extends ContainerComputer implements ComputerFilesRpc {
         kind: "exec",
       };
       let completed = false;
+      let stage: CommandStage = "preparing";
+      let opening = false;
+      let secrets: readonly string[] = [];
       try {
         const workspace = await this.readyWorkspace();
         hooks =
@@ -1959,7 +1966,10 @@ export class ComputerDO extends ContainerComputer implements ComputerFilesRpc {
             throw new Error("Computer host execution is unavailable");
           this.#executions.begin(invocation, route.id, executionContext);
           // The host's last awaited authority fence follows NEW admission.
+          opening = true;
           const carriage = await hooks.open(invocation, executionContext);
+          opening = false;
+          secrets = Object.values(carriage.env ?? {});
           execution = {
             invocation,
             carriage,
@@ -1972,6 +1982,7 @@ export class ComputerDO extends ContainerComputer implements ComputerFilesRpc {
             },
           };
         }
+        stage = "dispatched";
         const output = await exec(
           workspace,
           command,
@@ -1983,14 +1994,23 @@ export class ComputerDO extends ContainerComputer implements ComputerFilesRpc {
         completed = true;
         operations.settle(requestId, output);
       } catch (cause) {
-        operations.settleUnknown(
-          requestId,
-          executionContext !== undefined
-            ? "Computer hosted execution outcome is unavailable"
-            : cause instanceof Error
-              ? `${cause.name}: ${cause.message}`
-              : "Computer execution rejected without an Error",
-        );
+        // A host authority error may carry credential-bearing transport data:
+        // name only what failed there, never its message.
+        const reported =
+          opening && cause instanceof Error
+            ? new Error(`host authority was refused (${cause.name})`)
+            : cause;
+        const failure = describeCommandFailure({
+          stage,
+          cause: reported,
+          secrets,
+          hosted: executionContext !== undefined,
+        });
+        if (failure.kind === "not_started") {
+          operations.settle(requestId, failure.output);
+        } else {
+          operations.settleUnknown(requestId, failure.cause);
+        }
       } finally {
         if (hooks !== undefined && executionContext !== undefined) {
           const phase = this.#executions.get(invocation.id)?.phase;

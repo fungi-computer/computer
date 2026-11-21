@@ -1,3 +1,4 @@
+import { z } from "zod";
 import {
   computerOperationResultSchema,
   computerRequestIdSchema,
@@ -59,6 +60,11 @@ type OperationRow = {
   output_json: string | null;
 };
 
+/** Why an unknown outcome is unknown; stored where a known outcome's output is. */
+const unknownDetailSchema = z.strictObject({ cause: z.string() });
+const reopenedCause =
+  "The Computer restarted while this command was running, so its result was not recorded; it may still have run, so check before running it again.";
+
 /** The embedded UUIDv7 millisecond time; the ID is already Zod-validated. */
 function requestIdTime(requestId: ComputerRequestId): number {
   return Number.parseInt(requestId.replaceAll("-", "").slice(0, 12), 16);
@@ -83,8 +89,9 @@ export class ComputerOperationRecord {
     // Reopening never reinterprets unfinished work as permission to rerun it.
     storage.transactionSync(() => {
       sql.exec(
-        "UPDATE computer_operations SET status = 'unknown', updated_at = ? WHERE status IN ('accepted', 'running')",
+        "UPDATE computer_operations SET status = 'unknown', updated_at = ?, output_json = ? WHERE status IN ('accepted', 'running')",
         now(),
+        JSON.stringify({ cause: reopenedCause }),
       );
     });
   }
@@ -163,8 +170,9 @@ export class ComputerOperationRecord {
   settleUnknown(requestId: ComputerRequestId, cause: string): void {
     console.error("Computer operation outcome unknown", { requestId, cause });
     this.#storage.sql.exec(
-      "UPDATE computer_operations SET status = 'unknown', updated_at = ?, output_json = NULL WHERE request_id = ?",
+      "UPDATE computer_operations SET status = 'unknown', updated_at = ?, output_json = ? WHERE request_id = ?",
       this.#now(),
+      JSON.stringify({ cause }),
       requestId,
     );
   }
@@ -193,6 +201,16 @@ export class ComputerOperationRecord {
     row: OperationRow | undefined,
     now: number,
   ): ComputerOperationResult {
+    if (row?.status === "unknown") {
+      const cause =
+        row.output_json !== null && row.output_expires_at > now
+          ? unknownDetailSchema.parse(JSON.parse(row.output_json)).cause
+          : undefined;
+      const unknown = { requestId, status: "unknown", output: null };
+      return computerOperationResultSchema.parse(
+        cause === undefined ? unknown : { ...unknown, cause },
+      );
+    }
     if (row !== undefined) {
       return computerOperationResultSchema.parse({
         requestId,

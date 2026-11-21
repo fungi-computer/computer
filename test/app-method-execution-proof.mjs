@@ -72,6 +72,7 @@ try {
     requestId: cancellationId,
     status: "unknown",
     output: null,
+    cause: "TimeoutError: App execution wait expired",
   });
   const interruptedReplay = await execute(cancelledInput);
   assert.deepEqual(await interruptedReplay.json(), interrupted);
