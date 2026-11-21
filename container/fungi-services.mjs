@@ -48,6 +48,26 @@ async function existingServices() {
 }
 
 /** s6-svc exits 111 when no supervisor listens, which is true of a service that never started. */
+/**
+ * What went wrong, for the Hub to say in words. s6 reports its failures only as
+ * text, so this is the one place that reads it; callers get the kind.
+ */
+function failureOf(error) {
+  const text = `${error?.stderr ?? ""}\n${error?.message ?? String(error)}`;
+  const lines = text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "");
+  const kind = /timed out|ETIMEDOUT/u.test(text)
+    ? "timeout"
+    : /unable to control|supervisor not listening/u.test(text)
+      ? "refused"
+      : /No such file|ENOENT/u.test(text)
+        ? "missing"
+        : "other";
+  return { failure: kind, detail: (lines.at(-1) ?? "").slice(0, 300) };
+}
+
 async function stopSupervisor(name) {
   try {
     await control(name, "-dx");
@@ -164,5 +184,7 @@ try {
   }
 } catch (error) {
   console.error("fungi-services:", error);
+  // The last line: the kind of failure, then the last line the command wrote.
+  console.error(JSON.stringify(failureOf(error)));
   process.exit(1);
 }

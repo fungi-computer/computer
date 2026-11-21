@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type {
   ComputerServiceInventory,
   ComputerServicesApply,
@@ -11,23 +12,49 @@ export type ServicesCommandResult = Readonly<{
   stderr: string;
 }>;
 
+/** How a `fungi-services` command failed: its kind, and the last line it wrote. */
+const servicesFailureSchema = z.strictObject({
+  failure: z.enum(["refused", "missing", "timeout", "other"]),
+  detail: z.string(),
+});
+export type ComputerServicesFailure = z.output<typeof servicesFailureSchema>;
+
+/**
+ * The failure `fungi-services` reported on stderr. A command that wrote none
+ * (a crash, a stopped runtime) is `other`, with the last line it wrote.
+ */
+export function servicesFailureOf(
+  result: ServicesCommandResult,
+): ComputerServicesFailure {
+  const last = result.stderr.trim().split("\n").at(-1) ?? "";
+  try {
+    return servicesFailureSchema.parse(JSON.parse(last));
+  } catch {
+    return { failure: "other", detail: last };
+  }
+}
+
 /** `fungi-services apply` did not finish; the Computer's services may be stopped. */
 export class ComputerServicesApplyError extends Error {
+  readonly result: ServicesCommandResult;
   constructor(result: ServicesCommandResult) {
     super(
       `Computer services could not be applied (${result.status}, exit ${String(result.exitCode)}): ${result.stderr.slice(0, 500)}`,
     );
     this.name = "ComputerServicesApplyError";
+    this.result = result;
   }
 }
 
 /** A read or control command of `fungi-services` did not finish. */
 export class ComputerServicesCommandError extends Error {
+  readonly result: ServicesCommandResult;
   constructor(operation: string, result: ServicesCommandResult) {
     super(
       `Computer services ${operation} failed (${result.status}, exit ${String(result.exitCode)}): ${result.stderr.slice(0, 500)}`,
     );
     this.name = "ComputerServicesCommandError";
+    this.result = result;
   }
 }
 

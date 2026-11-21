@@ -1,5 +1,6 @@
 import { boundExecStream } from "./exec-output.js";
-import { portPreviewFailure, portPreviewReply } from "./port-failure.js";
+import { portPreviewFailure } from "./port-failure.js";
+import { forwardPreviewWaitingForPort } from "./preview-wait.js";
 export type { WorkspaceRuntimeResultOptions } from "@fungi.computer/cloudflare-computer";
 export { createLocalBackendReplayStore } from "./local-backend-replay.js";
 import { computerInternetAccess } from "./internet-access.js";
@@ -1498,12 +1499,23 @@ export class ComputerDO extends ContainerComputer implements ComputerFilesRpc {
       const hosted = this.hostedRoute();
       if (hosted === undefined)
         throw new ComputerBackendUnavailableError("no_backend");
-      const response = await this.withHostedResponse(hosted.backing, () =>
-        this.hostedContainerHost(hosted.backing)
-          .port(port)
-          .fetch(new Request(forwarded, { headers })),
-      );
-      return await portPreviewReply(response, request, port);
+      // A declared, enabled service on this port is still starting after a wake
+      // while the port is closed: wait for it, up to 20 s.
+      const service = this.services
+        .list()
+        .find(({ enabled, port: owned }) => enabled && owned === port);
+      return await forwardPreviewWaitingForPort({
+        service:
+          service === undefined ? undefined : { name: service.name, port },
+        port,
+        request,
+        attempt: () =>
+          this.withHostedResponse(hosted.backing, () =>
+            this.hostedContainerHost(hosted.backing)
+              .port(port)
+              .fetch(new Request(forwarded, { headers })),
+          ),
+      });
     } catch (cause) {
       console.error("Computer runtime operation failed", cause);
       return await portPreviewFailure("unreachable", request, port);

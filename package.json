@@ -1,6 +1,6 @@
 {
   "name": "@fungi.computer/computer",
-  "version": "0.17.0",
+  "version": "0.18.0",
   "author": "Levi <levi@technomancy.dev>",
   "description": "Cloudflare Computer host for one durable Fungi Computer",
   "type": "module",
@@ -54,6 +54,10 @@
     "./services": {
       "types": "./dist/services.d.ts",
       "import": "./dist/services.js"
+    },
+    "./services-apply": {
+      "types": "./dist/services-apply.d.ts",
+      "import": "./dist/services-apply.js"
     }
   },
   "files": [

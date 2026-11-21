@@ -19,6 +19,7 @@ import {
   refuseSilentGuest,
 } from "../../../tooling/celld-platform/computer-vm/vmd-proxy.mjs";
 import { portPreviewReply } from "../dist/port-failure.js";
+import { forwardPreviewWaitingForPort } from "../dist/preview-wait.js";
 
 const shots = process.env.COMPUTER_PREVIEW_FAILURE_SHOTS;
 if (shots) await mkdir(shots, { recursive: true });
@@ -45,10 +46,20 @@ const guest = http.createServer((_req, res) => {
 });
 const guestPort = await listen(guest);
 
+// A declared service's server, opened late: "web" starts answering a few tries in.
+const web = http.createServer((_req, res) => {
+  res.writeHead(200, { "content-type": "text/plain" }).end("hello from web\n");
+});
+const webPort = await listen(web);
+
 // vmd's port door, reduced to its routing: /asleep has no running VM.
 const vmd = http.createServer((req, res) => {
   if (req.url.startsWith("/asleep")) return refusePort(res, 503, "not_running");
-  const port = req.url.startsWith("/guest") ? guestPort : closedPort;
+  const port = req.url.startsWith("/guest")
+    ? guestPort
+    : req.url.startsWith("/web-open")
+      ? webPort
+      : closedPort;
   pipeHttpRequest(
     http,
     {
@@ -73,6 +84,35 @@ const preview = http.createServer(async (req, res) => {
   for (let index = 0; index < req.rawHeaders.length; index += 2)
     headers.append(req.rawHeaders[index], req.rawHeaders[index + 1]);
   const request = new Request(`http://localhost${req.url}`, { headers });
+  // A declared service "web" owns port 5173: the proof's clock moves instead of
+  // waiting 20 s, and /waking opens its port on the fourth try.
+  if (req.url.startsWith("/web") || req.url === "/waking") {
+    const time = { at: 0 };
+    let tries = 0;
+    const reply = await forwardPreviewWaitingForPort({
+      service: { name: "web", port: 5173 },
+      port: 5173,
+      request,
+      now: () => time.at,
+      delay: (ms) => {
+        time.at += ms;
+        return Promise.resolve();
+      },
+      attempt: () => {
+        tries += 1;
+        const open = req.url === "/waking" && tries >= 4;
+        return fetch(
+          `http://127.0.0.1:${vmdPort}${open ? "/web-open" : "/silent"}`,
+          {
+            headers,
+          },
+        );
+      },
+    });
+    res.writeHead(reply.status, Object.fromEntries(reply.headers));
+    res.end(Buffer.from(await reply.arrayBuffer()));
+    return;
+  }
   const upstream = await fetch(`http://127.0.0.1:${vmdPort}${req.url}`, {
     headers,
   });
@@ -96,6 +136,12 @@ try {
       502,
       "Nothing is answering on port 5173",
       "Start the server on this Computer, or check its port, then reload this page.",
+    ],
+    [
+      "/web",
+      504,
+      "web didn't open port 5173 within 20 s",
+      "Check its output under Services on this Computer's card, then reload this page.",
     ],
   ])
     for (const [width, height] of [
@@ -125,6 +171,25 @@ try {
       await page.close();
     }
 
+  // A declared service that opens its port a few tries after the wake is
+  // served: the visitor sees the service, never a failure.
+  const woken = await browser.newPage();
+  const served = await woken.goto(`${base}/waking`);
+  assert.equal(served?.status(), 200);
+  assert.equal(
+    (await woken.locator("body").innerText()).trim(),
+    "hello from web",
+  );
+  await woken.close();
+  const never = await fetch(`${base}/web`, {
+    headers: { "sec-fetch-dest": "empty" },
+  });
+  assert.equal(never.status, 504);
+  assert.deepEqual(await never.json(), {
+    error: "service_timeout",
+    message: "web didn't open port 5173 within 20 s",
+  });
+
   // A script's request gets the reason as data, with the same status.
   const script = await fetch(`${base}/asleep`, {
     headers: { "sec-fetch-dest": "empty" },
@@ -146,5 +211,5 @@ try {
   );
 } finally {
   await browser.close();
-  for (const server of [preview, vmd, guest]) server.close();
+  for (const server of [preview, vmd, guest, web]) server.close();
 }

@@ -832,6 +832,51 @@ for (const vm of [false, true]) {
     }
   });
 
+  test(`${name} still sleeps on schedule with declared services running, metered only to its last activity`, async (t) => {
+    const { FleetLifecycle } = await import("../dist/fleet/index.js");
+    const { ComputerServiceInventory } = await import("../dist/services.js");
+    const { clock, database, backing, destroyed, fleet, interval } = idleFleet(
+      t,
+      FleetLifecycle,
+      { vm },
+    );
+    try {
+      // Enabled services restart on every wake; they are not hosted work. A
+      // program that runs for days must not hold the Computer open or add to
+      // what the Team pays for.
+      const services = new ComputerServiceInventory(
+        fromNodeSqlite(database),
+        () => clock.now,
+      );
+      services.declare({ name: "web", command: "node server.js" }, "owner:a");
+      services.declare({ name: "worker", command: "node w.js" }, "agent");
+      assert.equal(
+        services.list().every((service) => service.enabled),
+        true,
+      );
+      clock.now += 2 * minute;
+      await fleet.run(hostGrant("sleeper"), backing, async () => "ls");
+      const lastActivity = clock.now;
+      for (let step = 0; step < 14; step++) {
+        clock.now += minute;
+        await fleet.observe();
+        assert.equal(interval().observedAt, lastActivity);
+        assert.equal(interval().ended, false);
+      }
+      assert.deepEqual(destroyed, []);
+      clock.now = lastActivity + sleepWindow;
+      await fleet.observe();
+      assert.equal(destroyed.length, 1, "the idle window ends the runtime");
+      assert.equal(interval().ended, true);
+      assert.equal(interval().observedAt, lastActivity);
+      // Declaring or stopping a service while it sleeps changes nothing about the sleep.
+      services.setEnabled("web", false);
+      assert.equal(destroyed.length, 1);
+    } finally {
+      database.close();
+    }
+  });
+
   test(`${name} stays awake and metered while a dispatch is in flight`, async (t) => {
     const { FleetLifecycle } = await import("../dist/fleet/index.js");
     const { clock, database, backing, destroyed, fleet, interval } = idleFleet(

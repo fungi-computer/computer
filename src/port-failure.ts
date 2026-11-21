@@ -22,14 +22,17 @@ const hostRefusalSchema = Schema.Literals([
  * Computer. `expired`: the preview link's five-minute ticket ran out.
  */
 export type PortPreviewFailure =
-  Schema.Schema.Type<typeof hostRefusalSchema> | "unreachable" | "expired";
+  | Schema.Schema.Type<typeof hostRefusalSchema>
+  | "unreachable"
+  | "expired"
+  | "service_timeout";
 
 /**
  * The VM host's typed refusal, or null when the reply is the guest's own.
  * vmd pipes an upgrade's bytes raw, so on an upgrade request the header could
  * be the guest's and is never read.
  */
-function hostPortRefusal(
+export function portPreviewRefusal(
   response: Response,
   request: Request,
 ): PortPreviewFailure | null {
@@ -39,6 +42,9 @@ function hostPortRefusal(
   );
   return Option.isSome(named) ? named.value : null;
 }
+
+/** How long a preview waits for a declared service to open its port. */
+export const declaredPortWaitSeconds = 20;
 
 const copy = {
   not_running: () => ({
@@ -61,16 +67,33 @@ const copy = {
     title: "This preview link has expired",
     detail: "Open the preview again from Fungi to get a fresh link.",
   }),
+  service_timeout: (port, service) => ({
+    title:
+      service === undefined || port === undefined
+        ? "The service didn't open its port in time"
+        : serviceTimeoutMessage(service, port),
+    detail:
+      "Check its output under Services on this Computer's card, then reload this page.",
+  }),
 } satisfies Record<
   PortPreviewFailure,
-  (port: number | undefined) => Readonly<{ title: string; detail: string }>
+  (
+    port: number | undefined,
+    service: string | undefined,
+  ) => Readonly<{ title: string; detail: string }>
 >;
+
+/** The one sentence for a declared service that never opened its port. */
+function serviceTimeoutMessage(service: string, port: number): string {
+  return `${service} didn't open port ${String(port)} within ${String(declaredPortWaitSeconds)} s`;
+}
 
 const statuses = {
   not_running: 503,
   not_listening: 502,
   unreachable: 502,
   expired: 403,
+  service_timeout: 504,
 } as const satisfies Record<PortPreviewFailure, number>;
 
 // The preview origin is isolated and loads no Fungi asset, so the page's
@@ -96,12 +119,24 @@ export async function portPreviewFailure(
   reason: PortPreviewFailure,
   request: Request,
   port?: number,
+  service?: string,
 ): Promise<Response> {
   const headers = { "Cache-Control": "no-store" };
   const status = statuses[reason];
   if (request.headers.get("sec-fetch-dest") !== "document")
-    return Response.json({ error: reason }, { status, headers });
-  const { title, detail } = copy[reason](port);
+    return Response.json(
+      reason === "service_timeout"
+        ? {
+            error: reason,
+            message:
+              service === undefined || port === undefined
+                ? "The service didn't open its port in time"
+                : serviceTimeoutMessage(service, port),
+          }
+        : { error: reason },
+      { status, headers },
+    );
+  const { title, detail } = copy[reason](port, service);
   const page = await html`<!doctype html>
     <html lang="en">
       <meta charset="utf-8" />
@@ -129,7 +164,7 @@ export async function portPreviewReply(
   request: Request,
   port: number,
 ): Promise<Response> {
-  const refused = hostPortRefusal(response, request);
+  const refused = portPreviewRefusal(response, request);
   if (refused !== null) {
     await response.body?.cancel();
     return await portPreviewFailure(refused, request, port);

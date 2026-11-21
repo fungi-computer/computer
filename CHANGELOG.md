@@ -1,5 +1,16 @@
 # @fungi.computer/computer
 
+## 0.18.0
+
+### Minor Changes
+
+- Changes since 0.17.0:
+
+  - feat(computer): a preview waits up to 20 s for a declared service to open
+    its port
+  - fix(hub): lead a failed service change with the service and its plain cause
+  - feat(hub): list and manage a Computer's services on its card
+
 ## 0.17.0
 
 ### Minor Changes
