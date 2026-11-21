@@ -1,5 +1,14 @@
 # @fungi.computer/computer
 
+## 0.18.5
+
+### Patch Changes
+
+- Changes since 0.18.4:
+
+  - fix(oyster): keep setup file writes on apply_patch and name a failed patch's
+    last line
+
 ## 0.18.4
 
 ### Patch Changes

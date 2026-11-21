@@ -12,7 +12,25 @@ const nativePatch = {
   cwd: workspaceRoot,
   timeoutMs: 30_000,
   mismatchExitCode: 23,
+  formatExitCode: 24,
 };
+
+/**
+ * A patch the engine rejects as malformed (its format exit code) is often cut
+ * short or wrapped. Quote the received last line so the Agent can fix the patch
+ * instead of guessing at what the engine saw.
+ */
+function withReceivedLastLine(
+  stderr: string,
+  patch: string,
+  exitCode: number,
+): string {
+  if (exitCode !== nativePatch.formatExitCode) return stderr;
+  const lines = patch.trim().split("\n");
+  const last = (lines.at(-1) ?? "").trim();
+  const shown = last.length > 80 ? `${last.slice(0, 80)}...` : last;
+  return `${stderr}\nThe patch you sent has ${String(lines.length)} lines and its last line is: ${JSON.stringify(shown)}. A patch ends with a line that is exactly *** End Patch, and every file line inside it starts with +, - or a space.\n`;
+}
 
 /** Await Workspace synchronization even when the native engine reports a partial failure. */
 export async function applyWorkspacePatch(
@@ -35,7 +53,7 @@ export async function applyWorkspacePatch(
   const stderr = boundExecStream(
     synchronizationFailure !== null
       ? `${result.stderr}\nPatch filesystem synchronization failed: ${synchronizationFailure}. Earlier patch writes may remain.`
-      : result.stderr,
+      : withReceivedLastLine(result.stderr, patch, result.exitCode),
     "stderr",
   );
   const output = {

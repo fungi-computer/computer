@@ -158,3 +158,46 @@ test("an oversized patch stream is cut with a visible marker and a typed truncat
   assert.equal(whole.truncated, false);
   assert.equal(disposed.length, 2);
 });
+
+test("a patch without its closing line is told what its last line was", async () => {
+  const stderr =
+    "invalid patch: The last line of the patch must be '*** End Patch'\nExpected patch format:\n";
+  const workspace = {
+    runtime: {
+      exec: async () => ({
+        result: async () => ({
+          status: "failed",
+          exitCode: 24,
+          stdout: "",
+          stderr,
+          sync: { status: "complete" },
+        }),
+        [Symbol.dispose]: () => undefined,
+      }),
+    },
+  };
+  const result = await applyWorkspacePatch(workspace, "hosted:vm", {
+    patch: "*** Begin Patch\n*** Add File: A.md\n+# Title\n+Last words\n",
+  });
+  assert.equal(result.status, "failed");
+  assert.match(result.stderr, /4 lines and its last line is: "\+Last words"/u);
+  const other = await applyWorkspacePatch(
+    {
+      runtime: {
+        exec: async () => ({
+          result: async () => ({
+            status: "failed",
+            exitCode: 1,
+            stdout: "",
+            stderr: "Patch syntax error",
+            sync: { status: "complete" },
+          }),
+          [Symbol.dispose]: () => undefined,
+        }),
+      },
+    },
+    "hosted:vm",
+    { patch: "*** Begin Patch\n*** End Patch\n" },
+  );
+  assert.equal(other.stderr, "Patch syntax error");
+});
