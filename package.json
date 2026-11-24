@@ -1,6 +1,6 @@
 {
   "name": "@fungi.computer/computer",
-  "version": "0.18.8",
+  "version": "0.18.9",
   "author": "Levi <levi@technomancy.dev>",
   "description": "Cloudflare Computer host for one durable Fungi Computer",
   "type": "module",
@@ -76,14 +76,14 @@
     "assemble:image": "node scripts/assemble-image.mjs"
   },
   "dependencies": {
-    "@fungi.computer/cairn": "0.1.0",
+    "@fungi.computer/cairn": "0.1.1",
     "@fungi.computer/capnweb": "0.12.0-fungi.0",
     "@fungi.computer/cloudflare-computer": "0.2.1-fungi.4",
     "@fungi.computer/cordyceps": "0.4.3",
-    "@fungi.computer/knapsack": "0.4.30",
-    "@fungi.computer/seam": "0.2.8",
-    "@fungi.computer/watchdog": "0.1.6",
-    "@fungi.computer/computer-contract": "0.6.7",
+    "@fungi.computer/knapsack": "0.4.31",
+    "@fungi.computer/seam": "0.2.9",
+    "@fungi.computer/watchdog": "0.1.7",
+    "@fungi.computer/computer-contract": "0.6.8",
     "effect": "4.0.2",
     "just-bash": "3.4.2",
     "zod": "4.4.3",

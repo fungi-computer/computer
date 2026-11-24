@@ -1,5 +1,17 @@
 # @fungi.computer/computer
 
+## 0.18.9
+
+### Patch Changes
+
+- Updated dependencies
+- Updated dependencies
+  - @fungi.computer/cairn@0.1.1
+  - @fungi.computer/knapsack@0.4.31
+  - @fungi.computer/computer-contract@0.6.8
+  - @fungi.computer/watchdog@0.1.7
+  - @fungi.computer/seam@0.2.9
+
 ## 0.18.8
 
 ### Patch Changes
