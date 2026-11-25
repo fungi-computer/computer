@@ -1,5 +1,19 @@
 # @fungi.computer/computer
 
+## 0.18.11
+
+### Patch Changes
+
+- Changes since 0.18.10:
+
+  - fix(files): treat a non-executable patch engine as a platform failure
+  - fix(files): say patch creates files and report a missing patch engine
+
+- Updated dependencies
+- Updated dependencies
+  - @fungi.computer/computer-contract@0.6.10
+  - @fungi.computer/knapsack@0.4.33
+
 ## 0.18.10
 
 ### Patch Changes

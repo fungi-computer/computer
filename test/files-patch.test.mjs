@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import console from "node:console";
 import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -200,4 +201,93 @@ test("a patch without its closing line is told what its last line was", async ()
     { patch: "*** Begin Patch\n*** End Patch\n" },
   );
   assert.equal(other.stderr, "Patch syntax error");
+});
+
+test("a missing patch engine is a typed platform failure, not the model's exit 127", async () => {
+  const errors = [];
+  const original = console.error;
+  console.error = (...args) => errors.push(args);
+  try {
+    const shell = {
+      runtime: {
+        exec: async () => ({
+          result: async () => ({
+            status: "failed",
+            exitCode: 127,
+            stdout: "",
+            stderr: "/bin/sh: 1: /opt/fungi/fungi-apply-patch: not found\n",
+            sync: { status: "complete" },
+          }),
+          [Symbol.dispose]: () => undefined,
+        }),
+      },
+    };
+    const enoent = {
+      runtime: {
+        exec: async () => {
+          throw Object.assign(new Error("spawn ENOENT"), { code: "ENOENT" });
+        },
+      },
+    };
+    for (const workspace of [shell, enoent]) {
+      const result = await applyWorkspacePatch(workspace, "hosted:vm", {
+        patch,
+      });
+      assert.equal(result.status, "failed");
+      assert.equal(result.error?.kind, "engine_missing");
+      assert.match(result.stderr, /platform problem, not the patch/u);
+      assert.doesNotMatch(result.stderr, /not found/u);
+    }
+    assert.equal(errors.length, 2);
+  } finally {
+    console.error = original;
+  }
+});
+
+test("a bad patch the engine rejects stays an ordinary result", async () => {
+  const workspace = {
+    runtime: {
+      exec: async () => ({
+        result: async () => ({
+          status: "failed",
+          exitCode: 24,
+          stdout: "",
+          stderr: "bad patch\n",
+          sync: { status: "complete" },
+        }),
+        [Symbol.dispose]: () => undefined,
+      }),
+    },
+  };
+  const result = await applyWorkspacePatch(workspace, "hosted:vm", { patch });
+  assert.equal(result.error, undefined);
+  assert.match(result.stderr, /^bad patch\n/u);
+});
+
+test("a present but non-executable patch engine is a typed platform failure", async () => {
+  const workspace = {
+    runtime: {
+      exec: async () => ({
+        result: async () => ({
+          status: "failed",
+          exitCode: 126,
+          stdout: "",
+          stderr:
+            "/bin/sh: 1: /opt/fungi/fungi-apply-patch: Permission denied\n",
+          sync: { status: "complete" },
+        }),
+        [Symbol.dispose]: () => undefined,
+      }),
+    },
+  };
+  const original = console.error;
+  console.error = () => undefined;
+  try {
+    const result = await applyWorkspacePatch(workspace, "hosted:vm", { patch });
+    assert.equal(result.error?.kind, "engine_missing");
+    assert.equal(result.exitCode, 126);
+    assert.match(result.stderr, /not executable \(a platform problem/u);
+  } finally {
+    console.error = original;
+  }
 });

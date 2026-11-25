@@ -13,7 +13,17 @@ const nativePatch = {
   timeoutMs: 30_000,
   mismatchExitCode: 23,
   formatExitCode: 24,
+  /** The shell's "command not found" status. */
+  missingExitCode: 127,
+  /** The shell's "found but not executable" status. */
+  notExecutableExitCode: 126,
 };
+
+/** Shown to the Agent when the Computer image lacks the engine; the patch was never judged. */
+const engineMissingReason =
+  "The Computer is missing its file-patch engine (a platform problem, not the patch). Retrying will not help.";
+const engineNotExecutableReason =
+  "The Computer's file-patch engine is not executable (a platform problem, not the patch). Retrying will not help.";
 
 /**
  * A patch the engine rejects as malformed (its format exit code) is often cut
@@ -39,14 +49,61 @@ export async function applyWorkspacePatch(
   input: { patch: string },
 ) {
   const { patch } = patchInputSchema.parse(input);
-  using run = await workspace.runtime.exec(nativePatch.executable, {
-    backend,
-    cwd: nativePatch.cwd,
-    encoding: "utf8",
-    stdin: patch,
-    timeoutMs: nativePatch.timeoutMs,
-  });
+  const failure = (cause: unknown, reason: string, exitCode: number) => {
+    console.error("Computer file-patch engine is unavailable", {
+      executable: nativePatch.executable,
+      cause,
+    });
+    return patchOutputSchema.parse({
+      status: "failed",
+      exitCode,
+      stdout: "",
+      stderr: reason,
+      truncated: false,
+      error: { kind: "engine_missing", reason },
+    });
+  };
+  const started = await workspace.runtime
+    .exec(nativePatch.executable, {
+      backend,
+      cwd: nativePatch.cwd,
+      encoding: "utf8",
+      stdin: patch,
+      timeoutMs: nativePatch.timeoutMs,
+    })
+    .then(
+      (value) => ({ value }),
+      (cause: unknown) => {
+        if (
+          cause instanceof Error &&
+          "code" in cause &&
+          cause.code === "ENOENT"
+        )
+          return null;
+        throw cause;
+      },
+    );
+  if (started === null)
+    return failure(
+      "spawn ENOENT",
+      engineMissingReason,
+      nativePatch.missingExitCode,
+    );
+  using run = started.value;
   const result = await run.result();
+  // The engine is the executed command, so its shell "not found" status means it is absent.
+  if (result.exitCode === nativePatch.missingExitCode)
+    return failure(
+      result.stderr,
+      engineMissingReason,
+      nativePatch.missingExitCode,
+    );
+  if (result.exitCode === nativePatch.notExecutableExitCode)
+    return failure(
+      result.stderr,
+      engineNotExecutableReason,
+      nativePatch.notExecutableExitCode,
+    );
   const synchronizationFailure =
     result.sync.status === "pending" ? result.sync.error : null;
   const stdout = boundExecStream(result.stdout, "stdout");
