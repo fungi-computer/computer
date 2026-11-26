@@ -1,5 +1,12 @@
 # @fungi.computer/computer
 
+## 0.18.17
+
+### Patch Changes
+
+- @fungi.computer/knapsack@0.4.39
+  - @fungi.computer/computer-contract@0.6.16
+
 ## 0.18.16
 
 ### Patch Changes
