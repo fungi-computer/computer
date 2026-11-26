@@ -67,6 +67,20 @@ export class ComputerRuntimeUsage {
     );
   }
 
+  /** When an open runtime started, or null when it is not open. */
+  startedAt(runtimeId: string): number | null {
+    this.ensure();
+    const row = this.sql
+      .exec(
+        "SELECT started_at FROM hub_computer_runtime_usage WHERE runtime_id=? AND ended=0",
+        runtimeId,
+      )
+      .toArray()[0];
+    return row === undefined
+      ? null
+      : z.number().int().nonnegative().parse(row.started_at);
+  }
+
   /** The last recorded activity of an open runtime; a missing record starts now. */
   lastActivity(runtimeId: string, now: number): number | null {
     this.ensure();

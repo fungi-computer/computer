@@ -71,6 +71,8 @@ export type FleetLifecyclePorts = Readonly<{
     containerRunning: (backing: HostedBacking) => Promise<boolean>;
     /** The Computer's process record learns that this backend went to sleep. */
     endedByIdleSleep: (backendId: string) => void;
+    /** Whether a command started since `since` is still running on this backend. */
+    hasRunningProcesses: (backendId: string, since: number) => boolean;
     vmQueuePosition: (hostId: string) => Promise<number | null>;
   }>;
 }>;
@@ -108,6 +110,10 @@ export class FleetLifecycle {
   readonly usage: ComputerRuntimeUsage;
   readonly #watchMs: number;
   #hostedOperations = 0;
+  /** Terminal sockets open right now: a person is attached, however quiet. */
+  #openSockets = 0;
+  /** Failed idle saves in a row, per runtime. */
+  #idleStopFailures = new Map<string, number>();
   #startingHosted = 0;
   #lastHostedActivity = Date.now();
   #recycling: Promise<ComputerVmRecycleError | undefined> | undefined;
@@ -284,7 +290,11 @@ export class FleetLifecycle {
     }
   }
   /** Transport traffic advances activity; an idle open connection does not. */
-  trackResponse(backing: HostedBacking, response: Response): Response {
+  trackResponse(
+    backing: HostedBacking,
+    response: Response,
+    options: Readonly<{ terminal?: boolean }> = {},
+  ): Response {
     const socket = response.webSocket ?? null;
     if (socket === null && response.body === null) return response;
     let lastRecordedAt = Date.now();
@@ -299,7 +309,20 @@ export class FleetLifecycle {
       const pair = new WebSocketPair();
       const client = pair[0];
       const server = pair[1];
+      // Only a person's terminal is attached. A preview or App socket (a dev
+      // server's live reload in a forgotten tab) does not hold the Computer up.
+      let attached = options.terminal === true;
+      const detach = () => {
+        if (!attached) return;
+        attached = false;
+        this.#openSockets--;
+        // The idle window starts when the person leaves.
+        const now = Date.now();
+        this.#lastHostedActivity = now;
+        this.usage.touchActivity(backing, now);
+      };
       const close = (event: CloseEvent) => {
+        detach();
         const code =
           event.code === 1000 || (event.code >= 3000 && event.code <= 4999)
             ? event.code
@@ -310,6 +333,7 @@ export class FleetLifecycle {
           server.close(code, event.reason);
       };
       const fail = () => {
+        detach();
         if (socket.readyState === WebSocket.OPEN)
           socket.close(1000, "Terminal transport failed");
         if (server.readyState === WebSocket.OPEN)
@@ -338,6 +362,7 @@ export class FleetLifecycle {
       server.binaryType = "arraybuffer";
       socket.accept();
       server.accept();
+      if (attached) this.#openSockets++;
       return new Response(null, {
         status: 101,
         webSocket: client,
@@ -482,7 +507,9 @@ export class FleetLifecycle {
    * in flight, or its owner opted into Keep awake. */
   private get awake(): boolean {
     return (
-      this.#hostedOperations > 0 || computerKeepAwake(this.ports.storage.sql)
+      this.#hostedOperations > 0 ||
+      this.#openSockets > 0 ||
+      computerKeepAwake(this.ports.storage.sql)
     );
   }
 
@@ -490,6 +517,26 @@ export class FleetLifecycle {
   private billedThrough(runtimeId: string, at: number): number {
     if (this.awake) return at;
     return Math.min(at, this.usage.lastActivity(runtimeId, at) ?? at);
+  }
+
+  /**
+   * Whether the host saw no traffic to this VM for the idle window: an SSH
+   * session or a served port keeps it up although the Hub saw nothing.
+   */
+  private async quietOnHost(
+    backing: HostedBacking,
+    now: number,
+  ): Promise<boolean> {
+    if (backing.kind !== "on-box-vm") return true;
+    const inventory = await this.ports.backend
+      .onBoxVmHost(backing.hostId)
+      .inventory();
+    const vm = inventory.find(
+      (entry) => entry.id === this.ports.backend.state.id.toString(),
+    );
+    return (
+      vm === undefined || now - vm.lastActive >= computerContainerSleepAfterMs
+    );
   }
 
   /** Whether an idle runtime has passed its sleep window. */
@@ -511,11 +558,39 @@ export class FleetLifecycle {
       newest,
       now,
     );
-    if (running && this.sleepDue(runtimeId, now)) {
+    // A command Fungi started that is still running is activity: the idle
+    // window starts when it ends. A row from before this runtime started is
+    // stale (its process died with the old VM) and is not trusted.
+    const runtimeStartedAt = this.usage.startedAt(runtimeId) ?? now;
+    if (
+      running &&
+      this.ports.backend.hasRunningProcesses(
+        attachedBackendId(backing),
+        runtimeStartedAt,
+      )
+    )
+      this.usage.touchActivity(backing, now);
+    if (
+      running &&
+      !this.hasPendingOperations &&
+      this.sleepDue(runtimeId, now) &&
+      (await this.quietOnHost(backing, now))
+    ) {
       try {
+        // Save the files before the runtime goes: a failed save keeps it up.
+        // A write made directly on the VM (SSH, a served port) between this
+        // save and the destroy is lost: an accepted, save-length window.
+        await this.ports.backend.syncRecycledWorkspace(backing);
         await this.destroyRuntime(backing, "Computer idle timeout");
+        this.#idleStopFailures.delete(runtimeId);
       } catch (cause) {
+        const failures = (this.#idleStopFailures.get(runtimeId) ?? 0) + 1;
+        this.#idleStopFailures.set(runtimeId, failures);
         this.diagnostic("computer_idle_stop_failed", "idle_stop", cause);
+        // A save that keeps failing leaves the Computer up until the host's
+        // 24 hour backstop ends it unsaved: say so before that.
+        if (failures >= 3)
+          this.diagnostic("computer_idle_stop_stuck", "idle_stop_stuck", cause);
         return { running: true, at: this.billedThrough(runtimeId, now) };
       }
       // The sleep ended every command still running on this backend; say so.

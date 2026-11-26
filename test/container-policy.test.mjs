@@ -63,7 +63,7 @@ test("the platform inactivity timeout is a one hour backstop, raised only for Ke
   await configureComputerContainer(container, false);
   await configureComputerContainer(container, true);
   assert.deepEqual(timeouts, [60 * 60 * 1_000, 24 * 60 * 60 * 1_000]);
-  assert.equal(computerContainerSleepAfterMs, 60 * 60 * 1_000);
+  assert.equal(computerContainerSleepAfterMs, 10 * 60 * 1_000);
 });
 
 test("the container kill switch refuses before configuring a container", async () => {

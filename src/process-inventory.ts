@@ -297,6 +297,22 @@ export class ComputerProcessInventory {
     });
   }
   /**
+   * Whether a command is still running on this backend. A row that started
+   * before `since` (the current runtime's start) belongs to a runtime that has
+   * since gone, so its process is gone too and the stale row is not trusted.
+   */
+  hasRunning(backend: string, since: number): boolean {
+    return (
+      this.#storage.sql
+        .exec(
+          "SELECT 1 FROM computer_processes WHERE backend = ? AND state = 'running' AND started_at >= ? LIMIT 1",
+          backend,
+          since,
+        )
+        .toArray().length > 0
+    );
+  }
+  /**
    * The Computer slept after sitting idle, so every command still running on
    * that backend stopped with it. Record them as ended by idle sleep, in one
    * transaction, instead of leaving a later liveness probe to report an

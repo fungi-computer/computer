@@ -660,7 +660,10 @@ test("fleet creation commits inventory and backing together and returns projecti
 });
 
 const minute = 60_000;
-const sleepWindow = 60 * minute;
+const { computerContainerSleepAfterMs: sleepWindow } =
+  await import("../dist/container-policy.js");
+// Idle checkpoints before the window passes, a minute apart.
+const quietSteps = sleepWindow / minute - 1;
 const hostGrant = (computerId) => ({
   computerId,
   actions: new Set(["start"]),
@@ -683,6 +686,7 @@ function idleFleet(
   const runtime = { running: true, runtimeId: "runtime-one", exit: null };
   const destroyed = [];
   const slept = [];
+  const saved = [];
   const stop = async (reason) => {
     await beforeStop();
     destroyed.push(reason);
@@ -698,8 +702,13 @@ function idleFleet(
     alarm: { waitUntil: () => undefined },
     computerId: "sleeper",
     backend: {
+      // The idle stop saves the files first; a test that cares overrides this.
+      syncRecycledWorkspace: async (stopping) => {
+        saved.push(stopping);
+      },
       ...backend,
       endedByIdleSleep: (backendId) => slept.push(backendId),
+      hasRunningProcesses: () => false,
       state: {
         id: { toString: () => "sleeper" },
         container: {
@@ -711,6 +720,8 @@ function idleFleet(
       },
       onBoxVmHost: () => ({
         state: async () => ({ ...runtime }),
+        // The host saw no traffic to this VM.
+        inventory: async () => [],
         destroy: async () => {
           await stop("destroyed");
           return { ok: true };
@@ -807,7 +818,7 @@ for (const vm of [false, true]) {
       await fleet.run(hostGrant("sleeper"), backing, async () => "ls");
       const lastActivity = clock.now;
       // Idle checkpoints never run ahead of the last activity.
-      for (let step = 0; step < 14; step++) {
+      for (let step = 0; step < quietSteps - 2; step++) {
         clock.now += minute;
         await fleet.observe();
         assert.equal(interval().observedAt, lastActivity);
@@ -857,7 +868,7 @@ for (const vm of [false, true]) {
       clock.now += 2 * minute;
       await fleet.run(hostGrant("sleeper"), backing, async () => "ls");
       const lastActivity = clock.now;
-      for (let step = 0; step < 14; step++) {
+      for (let step = 0; step < quietSteps - 2; step++) {
         clock.now += minute;
         await fleet.observe();
         assert.equal(interval().observedAt, lastActivity);
@@ -1073,4 +1084,35 @@ test("a Computer store from before Computer sizes upgrades in place and keeps it
   } finally {
     database.close();
   }
+});
+
+test("a save that keeps failing keeps the Computer up and says so loudly on the third failure", async (t) => {
+  const { FleetLifecycle } = await import("../dist/fleet/index.js");
+  const { clock, destroyed, fleet } = idleFleet(t, FleetLifecycle, {
+    vm: false,
+    backend: {
+      syncRecycledWorkspace: async () => {
+        throw new Error("workspace store unavailable");
+      },
+    },
+  });
+  clock.now += sleepWindow + minute;
+  const events = [];
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    await fleet.observe();
+    events.push(
+      fleet
+        .takeFacts()
+        .filter((fact) => fact.kind === "diagnostic")
+        .map((fact) => fact.event),
+    );
+    clock.now += minute;
+  }
+  // Never stopped unsaved, and only the third failure is the loud one.
+  assert.deepEqual(destroyed, []);
+  assert.deepEqual(events, [
+    ["computer_idle_stop_failed"],
+    ["computer_idle_stop_failed"],
+    ["computer_idle_stop_failed", "computer_idle_stop_stuck"],
+  ]);
 });

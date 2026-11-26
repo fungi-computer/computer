@@ -1,5 +1,19 @@
 # @fungi.computer/computer
 
+## 0.19.0
+
+### Minor Changes
+
+- Changes since 0.18.17:
+
+  - fix(computer): give the terminal its own response hook instead of an option
+  - fix(computer): drop an unused parameter from the base response hook
+  - fix(computer): keep the platform backstop at an hour and count only terminal
+    sockets as attached
+  - fix(computer): count open terminals, trust no stale process rows and shout
+    when saves keep failing
+  - feat(computer): save files and stop an idle Computer after ten minutes
+
 ## 0.18.17
 
 ### Patch Changes

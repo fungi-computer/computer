@@ -961,6 +961,11 @@ export class ComputerDO extends ContainerComputer implements ComputerFilesRpc {
     this.#processes.endedByIdleSleep(backendId);
   }
 
+  /** A command still running on this backend keeps the Computer from idling out. */
+  protected hasRunningProcesses(backendId: string, since: number): boolean {
+    return this.#processes.hasRunning(backendId, since);
+  }
+
   /** Host-admitted settings write; egress reads the current durable value. */
   internetAccess(enabled?: boolean): boolean {
     return computerInternetAccess(this.state.storage.sql, enabled);
@@ -2598,7 +2603,8 @@ export class ComputerDO extends ContainerComputer implements ComputerFilesRpc {
 
     try {
       const url = await target();
-      const response = await this.withHostedResponse(hosted.backing, () =>
+      // A person's terminal is attached; a preview or App socket is not.
+      const response = await this.withTerminalResponse(hosted.backing, () =>
         this.hostedContainerHost(hosted.backing)
           .port(computerTerminalPort)
           .fetch(new Request(url, request)),
@@ -2620,6 +2626,14 @@ export class ComputerDO extends ContainerComputer implements ComputerFilesRpc {
     run: () => Promise<Response>,
   ): Promise<Response> {
     return run();
+  }
+
+  /** The terminal's upgrade: a person is attached for as long as it stays open. */
+  protected withTerminalResponse(
+    backing: HostedBacking,
+    run: () => Promise<Response>,
+  ): Promise<Response> {
+    return this.withHostedResponse(backing, run);
   }
 
   /** Host-owned display labels only; never credentials or provider URLs. */

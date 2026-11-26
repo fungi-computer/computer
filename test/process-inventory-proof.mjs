@@ -304,7 +304,20 @@ test("an idle sleep ends only that backend's running commands, with its reason",
   inventory.exited(finished.id, 0);
   const elsewhere = start("local-abcdefghijklmnop", "make watch");
 
+  // A command still running keeps its backend from idling out; one that ended does not.
+  const since = 0;
+  assert.equal(inventory.hasRunning("container", since), true);
+  assert.equal(inventory.hasRunning("local-abcdefghijklmnop", since), true);
+  assert.equal(inventory.hasRunning("nothing-here", since), false);
+  // A row from before the current runtime started is stale: its process died
+  // with the old VM, so it does not hold the Computer up.
+  assert.equal(
+    inventory.hasRunning("container", Number.MAX_SAFE_INTEGER),
+    false,
+  );
   inventory.endedByIdleSleep("container");
+  assert.equal(inventory.hasRunning("container", since), false);
+  assert.equal(inventory.hasRunning("local-abcdefghijklmnop", since), true);
 
   assert.deepEqual(
     {
